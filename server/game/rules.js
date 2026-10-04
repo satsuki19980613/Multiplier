@@ -22,8 +22,8 @@ export class MoveError extends Error{
 const clone=x=>structuredClone(x);
 export function shuffle(a,rnd){a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 
-/** 🤖 + capitalised persona, e.g. '🤖 Tight' */
-export const botName=persona=>'🤖 '+persona[0].toUpperCase()+persona.slice(1);
+/** capitalised persona, e.g. 'Tight' (the UI marks bot seats with a "Bot" text tag from meta.bot) */
+export const botName=persona=>persona[0].toUpperCase()+persona.slice(1);
 
 /** buy-in of a stake key (free = 0) */
 export const buyInOf=stake=>stake==='free'?0:STAKES[stake].buyIn;

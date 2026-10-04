@@ -186,7 +186,7 @@ async function showResult() {
   const v = t.v, me = t.me, m = v.meta, place = placeOf(v, me), stake = m.stake, buy = m.buyIn || 0;
   const gain = place === 1 ? m.prize : 0, delta = gain - buy;
   const order = [0, 1, 2].map(s => ({ s, p: placeOf(v, s) ?? 9 })).sort((a, b) => a.p - b.p);
-  const rows = order.map(({ s, p }) => `<li class="${s === me ? 'me-row' : ''}"><span class="pn">${p < 9 ? p : '–'}</span><span class="nm2">${s === me ? '<span class="me">YOU</span> ' : ''}${esc(v.names[s])}</span><span class="pr">${p === 1 ? fmt(m.prize) : ''}</span></li>`).join('');
+  const rows = order.map(({ s, p }) => `<li class="${s === me ? 'me-row' : ''}"><span class="pn">${p < 9 ? p : '–'}</span><span class="nm2">${s === me ? '<span class="me">YOU</span> ' : ''}${isBot(s) ? '<span class="bot-tag">Bot</span>' : ''}${esc(v.names[s])}</span><span class="pr">${p === 1 ? fmt(m.prize) : ''}</span></li>`).join('');
   const draw = bal => `${head('RESULT', place === 1 ? 'Winner' : v.over ? 'Game over' : 'Eliminated', place === 1 ? 'c' : '')}
     <div class="over-hd"><span class="place${place === 1 ? ' p1' : ''}">${place ?? '–'}<sup>${place ? ordinal(place).slice(String(place).length) : ''}</sup></span></div>
     <div class="over-gain ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'even'}">${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${fmt(Math.abs(delta))}<small>CHIPS</small></div>
@@ -304,7 +304,7 @@ function seatHTML(s, M, isMe) {
   else if (S.allIn) note = '<span class="ai">ALL-IN</span>';
   else if (S.away) note = 'AWAY';
   else if (acting && isBot(s)) note = '<span class="dots" style="margin:0"><i></i><i></i><i></i></span>';
-  const name = isMe ? 'YOU' : esc(v.names[s]);
+  const name = isMe ? 'YOU' : (isBot(s) ? '<span class="bot-tag">Bot</span>' : '') + esc(v.names[s]);
   const dbtn = v.button === s && !S.out ? '<b class="dbtn" title="Dealer">D</b>' : '';
   const clk = acting && !isBot(s) ? clockBarHTML(s) : '';
   const bet = !isMe && S.bet > 0 ? `<div class="bchip"><i></i><b>${fmt(S.bet)}</b></div>` : '';

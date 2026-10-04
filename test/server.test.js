@@ -43,7 +43,7 @@ test('createTable: free-roll has no multiplier, a fixed prize and the free-roll 
   const t=mk([human(0),bot('tight'),bot('loose')],'free');
   assert.equal(t.meta.multiplier,null);assert.equal(t.meta.buyIn,0);assert.equal(t.meta.prize,FREEROLL.prize);
   assert.equal(t.state.levelMs,FREEROLL.levelMs);assert.ok(t.state.handStart.every(x=>x===FREEROLL.stack));
-  assert.deepEqual(t.state.names,['P0','🤖 Tight','🤖 Loose']);
+  assert.deepEqual(t.state.names,['P0','Tight','Loose']);
   assert.deepEqual(t.meta.bots.map(b=>b&&b.persona),[null,'tight','loose']);
   assert.throws(()=>createTable({players:[human(0)],stake:'low',now:T0,rnd:rndFor(1)}));
   assert.throws(()=>createTable({players:[human(0),human(1),human(2)],stake:'x',now:T0,rnd:rndFor(1)}));

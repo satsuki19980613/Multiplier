@@ -81,7 +81,8 @@ button,.card,input[type=range]{touch-action:manipulation}
 .foot .links{display:flex;gap:12px}
 .foot a{text-decoration:underline;text-underline-offset:2px}
 body[data-screen="menu"] .stage,body[data-screen="menu"] .ingame{display:none}
-body[data-screen="game"] .menu{display:none}
+body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
+.bot-tag{display:inline-block;margin-right:5px;padding:0 4px;border:1px solid currentColor;font-size:.72em;font-weight:700;letter-spacing:.04em;line-height:1.4;vertical-align:1px;opacity:.7}
 
 /* ===== menu ===== */
 .menu{min-height:0;overflow:auto;display:grid;place-items:center;padding:8px 16px 20px}
