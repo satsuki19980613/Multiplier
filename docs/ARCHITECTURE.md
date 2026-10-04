@@ -205,3 +205,21 @@ Data API RPC（`authenticated` にのみ公開。表は直接触らせない）�
 - `functions/_middleware.js`：`request.cf.country` が `JP` 以外なら 403 と日英の案内を返す（`cf` が無い開発環境では通す）。
 - `public/terms.html`、`public/privacy.html`：運営者名や連絡先など、さつきが決める部分は【】のプレースホルダにする。
 - アプリ内には、他社のポーカーサイトの名称、外部の賭博サイトへのリンク、「本番」「稼ぐ」のような語を一切出さない。
+
+## 10. 実装で確定した細部（2026-10-04 結合時に追記）
+
+- **engine**
+  - `applyAction` / `autoAction` は `g` をその場で書き換え、`g` を返す。違法な手は `EngineError` を投げ、このとき状態は変わらない。
+  - `newGame` は任意の `stacks`・`button` を受け取る。
+  - 状態に `seed`（ChaCha20 の鍵、uint32×8）・`ctr`・`handAt`・`handStart`・`needAct`・`seen`・`lastHand.uncalled` を追加した。`viewFor` は `deck`・`seed`・`ctr` を消す。
+  - `handName` は役名だけを返す。
+- **spin**: `seasonOf(...)` の `startsAt` / `endsAt` は `Date`。1〜3月は前年の H2 として扱う。
+- **server**
+  - DB の `games.state` は `{ g, meta }`。Bot の persona は meta にだけ持ち、ビューには出さない。
+  - ビューの `meta` は `{ stake, buyIn, multiplier, prize, bot:[bool×3], clock, result, seat }`。
+  - `result` は `{ places, winner, payouts, after:[残高|null×3], ... }`。
+  - `queue` の返り値に `now` を含める。
+  - `profiles.played`: 今シーズンに1戦以上したか。ランキングの対象条件で、シーズンが変わると 0 に戻る。
+  - 「自分の進行中の卓」は、status が active で、かつ自分の順位が未確定の卓に限る。人間が全員脱落したら、その卓はすぐに終局させる。
+  - フリーロールの閾値は `me()` の SQL にも書いてある。`spin.js` の値を変えたら SQL も合わせる。
+- **ビルド**: フォルダ名の `&` が npm の .cmd ラッパーを壊すため、npm scripts は vite を `node node_modules/vite/bin/vite.js` で直接起動する。

@@ -3,8 +3,8 @@
 import{branchArg,neon}from'./neon.mjs';
 
 const ORIGINS={
-  dev:['http://localhost:5173','http://localhost:4173'],
-  production:['https://multiplier.pages.dev','http://localhost:5173','http://localhost:4173'],
+  dev:['http://localhost:5180','http://localhost:4180'],
+  production:['https://multiplier.pages.dev','http://localhost:5180','http://localhost:4180'],
 };
 const branch=branchArg();
 const origins=(process.env.ALLOWED_ORIGINS?.split(',')??ORIGINS[branch]??ORIGINS.dev).join(',');

@@ -1,5 +1,5 @@
 /**
- * Neon Function "game" (VS Player). Deploy: npm run deploy:game -- --branch <branch>
+ * Neon Function "game" (Multiplier). Deploy: npm run deploy:game -- --branch <branch>
  * Neon sets DATABASE_URL (database owner), NEON_AUTH_JWKS_URL and NEON_AUTH_BASE_URL. ALLOWED_ORIGINS comes from --env.
  */
 import{attachDatabasePool}from'@neon/functions';
@@ -24,8 +24,10 @@ const handler=createHandler({
     if(payload.role!=='authenticated')return null;
     return typeof payload.sub==='string'&&UUID.test(payload.sub)?payload.sub:null;
   },
-  match:db.match,
-  play:db.play,
+  queue:db.queue,
+  leave:db.leave,
+  act:db.act,
+  tick:db.tick,
   logError(m,e){console.error(m,e instanceof Error?`${e.name}: ${e.message}`:String(e))},
 });
 

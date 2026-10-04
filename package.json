@@ -5,10 +5,10 @@
   "description": "Multiplier — 3-handed hyper-turbo poker tournaments with a random prize multiplier (free play money)",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:prod": "vite --mode production",
-    "build": "vite build",
-    "preview": "vite preview",
+    "dev": "node node_modules/vite/bin/vite.js",
+    "dev:prod": "node node_modules/vite/bin/vite.js --mode production",
+    "build": "node node_modules/vite/bin/vite.js build",
+    "preview": "node node_modules/vite/bin/vite.js preview",
     "test": "node --test \"test/*.test.js\"",
     "db:migrate": "node scripts/db.mjs migrate",
     "deploy:game": "node scripts/deploy-game.mjs"

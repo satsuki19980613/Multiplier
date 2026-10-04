@@ -35,7 +35,7 @@
 | 目的 | コマンド |
 |---|---|
 | セットアップ | `npm install` |
-| 開発サーバー | `npm run dev`（http://localhost:5173。**`?fake` でサーバー無しに全画面を確認できる**） |
+| 開発サーバー | `npm run dev`（http://localhost:5180。**`?fake` でサーバー無しに全画面を確認できる**） |
 | 単体テスト | `npm test` |
 | ビルド | `npm run build` |
 | マイグレーション | `npm run db:migrate -- --branch dev`（Neon プロジェクトの作成後。本番は**さつきの確認後**） |

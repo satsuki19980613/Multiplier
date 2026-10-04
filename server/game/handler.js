@@ -1,7 +1,11 @@
 // Neon Function "game": HTTP behaviour (CORS, auth, routing). JWT checks and the database come in as deps so it can be unit-tested.
-import{MoveError}from'./rules.js';
+import{MoveError,STAKE_KEYS}from'./rules.js';
 
 export const MAX_BODY=4096;
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// MoveError code -> HTTP status (anything else is 422)
+export const STATUS={not_found:404,no_profile:403,gone:409,stale:409,not_yet:409,game_over:409,not_your_turn:409,busy:409,
+  insufficient_chips:409,freeroll_unavailable:409,locked_stake:409,illegal:422};
 
 export function createHandler(deps){
   const allowed=new Set(deps.allowedOrigins);
@@ -19,19 +23,24 @@ export function createHandler(deps){
     try{const t=await req.text();if(t.length>MAX_BODY)return reply(422,{error:'malformed'});body=JSON.parse(t)}catch{return reply(422,{error:'malformed'})}
     if(!body||typeof body!=='object')return reply(422,{error:'malformed'});
     try{
-      if(body.op==='match'){
-        if(typeof body.target!=='string'||!/^[0-9a-f-]{36}$/i.test(body.target)||body.target===uid)return reply(422,{error:'malformed'});
-        return reply(200,await deps.match(uid,body.target));
+      switch(body.op){
+        case'queue':
+          if(!STAKE_KEYS.includes(body.stake))return reply(422,{error:'malformed'});
+          return reply(200,await deps.queue(uid,body.stake));
+        case'leave':
+          return reply(200,await deps.leave(uid));
+        case'act':
+          if(!(typeof body.game==='string'&&UUID.test(body.game))||!Number.isInteger(body.ver)||!body.move||typeof body.move!=='object')return reply(422,{error:'malformed'});
+          return reply(200,await deps.act(uid,body.game,{ver:body.ver,move:body.move}));
+        case'tick':
+          if(!(typeof body.game==='string'&&UUID.test(body.game)))return reply(422,{error:'malformed'});
+          return reply(200,await deps.tick(uid,body.game));
+        default:
+          return reply(422,{error:'malformed'});
       }
-      if(['act','timeout','resign'].includes(body.op)){
-        if(typeof body.game!=='string'||!/^[0-9a-f-]{36}$/i.test(body.game))return reply(422,{error:'malformed'});
-        return reply(200,await deps.play(uid,body.game,body));
-      }
-      return reply(422,{error:'malformed'});
     }catch(e){
       if(e instanceof MoveError){
-        const st={not_found:404,gone:409,stale:409,not_yet:409,game_over:409,not_your_turn:409,busy:409,no_profile:403}[e.code]??422;
-        return reply(st,{error:e.code,...(e.extra||{})});
+        return reply(STATUS[e.code]??422,{error:e.code,...(e.extra||{})});
       }
       log('game: unexpected error',e);
       return reply(500,{error:'internal'});
