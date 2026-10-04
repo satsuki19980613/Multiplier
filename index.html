@@ -22,7 +22,7 @@
     <div class="brand"><span>Multiplier</span></div>
     <nav class="navpill" aria-label="メニュー">
       <button class="nbtn" id="rulesBtn" type="button" aria-label="Rules">?</button>
-      <button class="nbtn ingame" id="menuBtn" type="button">Menu</button>
+      <button class="nbtn ingame retire" id="retireBtn" type="button">Retire</button>
     </nav>
     <div class="top-r">
       <button class="sound-toggle" id="soundToggle" type="button" aria-label="サウンド" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 9.5v5h4l5 4v-13l-5 4z" fill="currentColor" stroke="none"/><g class="snd-waves"><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18.3 6.5a8 8 0 0 1 0 11"/></g><path class="snd-off" d="M16 9.5l5 5M21 9.5l-5 5"/></svg></button>
@@ -57,6 +57,7 @@
 <div class="wheel" id="wheel" hidden></div>
 <div class="toast" id="toast" role="status"></div>
 
+<dialog id="retireDlg" class="sm"><div class="dlg" id="retireBody"></div></dialog>
 <dialog id="overDlg"><div class="dlg" id="overBody"></div></dialog>
 <dialog id="rankDlg"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="rankBody"></div></dialog>
 <dialog id="profDlg" class="sm"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="profBody"></div></dialog>

@@ -74,6 +74,8 @@ button,.card,input[type=range]{touch-action:manipulation}
 .navpill{display:flex;align-items:center;gap:2px;padding:3px;background:var(--nav-bg);color:var(--nav-ink);box-shadow:0 10px 30px -14px rgba(0,0,0,.45);border:1px solid var(--hair)}
 .nbtn{border:0;background:none;color:var(--nav-ink);padding:7px 14px;font-size:13px;font-weight:600;font-family:var(--f-num);cursor:pointer;white-space:nowrap;transition:background .15s}
 .nbtn:hover{background:rgba(255,255,255,.12)}
+.nbtn[hidden]{display:none}
+.nbtn.retire{color:var(--cpu)}
 .theme-toggle{justify-self:end;width:2rem;height:2rem;display:grid;place-items:center;border:1px solid var(--hair-2);background:transparent;color:var(--ink);cursor:pointer;transition:border-color .3s cubic-bezier(.2,.8,.2,1),transform .4s cubic-bezier(.2,.8,.2,1)}
 @media (hover:hover){.theme-toggle:hover{border-color:var(--ink);transform:rotate(45deg)}}
 .theme-toggle svg{width:13px;height:13px}
@@ -115,8 +117,6 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .mbtn:active:not(:disabled){transform:scale(.99)}
 .mbtn:disabled{opacity:.45;cursor:default}
 @media (hover:hover){.mbtn:hover:not(:disabled){border-color:var(--hair-2);background:var(--glass)}}
-.mbtn.resume{border-color:var(--you)}
-.mbtn.resume .rt{color:var(--you-text)}
 .back{justify-self:start;border:0;background:none;padding:6px 0;font-family:var(--f-num);font-size:12px;font-weight:600;letter-spacing:.14em;color:var(--muted);cursor:pointer}
 .back:hover{color:var(--ink)}
 .stk-row{min-height:72px}
@@ -151,6 +151,7 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .btn.primary{background:var(--ink);color:var(--bg);border-color:transparent}
 .btn.accent{background:linear-gradient(135deg,#4C88A6,var(--you));color:#fff;border-color:transparent}
 .btn.ghost{background:transparent}
+.btn.danger{background:var(--cpu);color:var(--cpu-ink);border-color:transparent}
 .btn:disabled{opacity:.35;cursor:default}
 .btns .btn{min-height:46px;font-size:15px}
 
@@ -397,16 +398,18 @@ dialog::backdrop{background:rgba(12,14,20,.28);-webkit-backdrop-filter:blur(8px)
   --glass-hi:rgba(255,255,255,.1);--glass-lo:rgba(255,255,255,.03);--edge:rgba(255,255,255,.14);--shadow:0 28px 60px -26px rgba(0,0,0,.75);--you-text:#7DB4CF}
 .wheel.dk.t3,.wheel.dk.t4{--bg:#05060A}
 .w-bg{inset:-40px;opacity:0}
-.w-rays{left:50%;top:50%;width:170vmax;height:170vmax;margin:-85vmax 0 0 -85vmax;opacity:0;will-change:transform;
-  background:repeating-conic-gradient(from 0deg,color-mix(in srgb,var(--cpu) 26%,transparent) 0 3deg,transparent 3deg 14deg);
-  -webkit-mask-image:radial-gradient(circle,transparent 0,#000 7%,#000 18%,transparent 40%);mask-image:radial-gradient(circle,transparent 0,#000 7%,#000 18%,transparent 40%)}
+.w-rays{left:var(--rx,50%);top:var(--ry,50%);width:170vmax;height:170vmax;margin:-85vmax 0 0 -85vmax;opacity:0;will-change:transform;
+  background:repeating-conic-gradient(from 0deg,transparent 0deg,color-mix(in srgb,var(--cpu) 9%,transparent) 1.4deg,transparent 2.8deg,transparent 15deg);
+  -webkit-mask-image:radial-gradient(circle,transparent 4%,rgba(0,0,0,.55) 9%,#000 14%,rgba(0,0,0,.45) 24%,transparent 38%);
+  mask-image:radial-gradient(circle,transparent 4%,rgba(0,0,0,.55) 9%,#000 14%,rgba(0,0,0,.45) 24%,transparent 38%)}
 .w-scan{inset:-4px 0;opacity:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 1px,transparent 1px 4px);background-size:100% 4px;animation:wScan .45s linear infinite}
 @keyframes wScan{to{background-position:0 4px}}
-.w-vig{inset:0;opacity:0;box-shadow:inset 0 0 150px 24px color-mix(in srgb,var(--cpu) 42%,transparent)}
-.w-glow{inset:0;opacity:0;transition:opacity .5s;background:radial-gradient(60% 50% at 50% 48%,color-mix(in srgb,var(--tc) 38%,transparent),transparent 70%)}
+.w-vig{inset:-10%;opacity:0;background:radial-gradient(closest-side at var(--rx,50%) var(--ry,50%),transparent 45%,rgba(0,0,0,.28) 72%,rgba(0,0,0,.62) 100%)}
+.w-glow{inset:0;opacity:0;transition:opacity .5s;background:radial-gradient(circle at var(--gx,50%) var(--gy,48%),color-mix(in srgb,var(--tc) 32%,transparent) 0,color-mix(in srgb,var(--tc) 20%,transparent) 12%,color-mix(in srgb,var(--tc) 10%,transparent) 24%,color-mix(in srgb,var(--tc) 4%,transparent) 36%,color-mix(in srgb,var(--tc) 1%,transparent) 47%,transparent 58%)}
 .wheel.rev .w-glow{opacity:1}
-.wheel.t3 .w-glow,.wheel.t4 .w-glow{background:radial-gradient(70% 62% at 50% 46%,color-mix(in srgb,var(--tc) 58%,transparent),transparent 72%);animation:wGlow 1.6s ease-in-out infinite alternate}
-@keyframes wGlow{from{filter:brightness(.8)}to{filter:brightness(1.25)}}
+.wheel.t3 .w-glow,.wheel.t4 .w-glow{background:radial-gradient(circle at var(--gx,50%) var(--gy,48%),color-mix(in srgb,var(--tc) 58%,transparent) 0,color-mix(in srgb,var(--tc) 36%,transparent) 12%,color-mix(in srgb,var(--tc) 19%,transparent) 24%,color-mix(in srgb,var(--tc) 8%,transparent) 36%,color-mix(in srgb,var(--tc) 2%,transparent) 47%,transparent 58%)}
+.wheel.rev.t3 .w-glow,.wheel.rev.t4 .w-glow{animation:wGlow 1.8s ease-in-out infinite alternate}
+@keyframes wGlow{from{opacity:.78}to{opacity:1}}
 .w-fx{inset:0;width:100%;height:100%;z-index:4}
 .w-flash{inset:0;background:#fff;opacity:0;z-index:5}
 .w-top{position:relative;text-align:center}

@@ -123,7 +123,7 @@ export function newGame({ stack, levelMs, now = 0, rnd, names, stacks, button } 
     button: 0, handNo: 0, seed, ctr: 0, deck: [], holes: [null, null, null], board: [], street: 'preflop', toAct: null,
     bet: [0, 0, 0], total: [0, 0, 0], folded: [false, false, false], allIn: [false, false, false],
     currentBet: 0, minRaise: BLINDS[0][1], handStart: st.slice(), seen: [null, null, null], needAct: [false, false, false],
-    lastHand: null, places: [null, null, null], over: false, winner: null, log: [],
+    lastHand: null, places: [null, null, null], over: false, winner: null, log: [], forfeited: 0,
   };
   let b = button;
   if (b == null) { const s = stream(g); b = s.below(3); s.done(); }
@@ -263,17 +263,44 @@ export function autoAction(g, seat, now) {
   return applyAction(g, seat, { type: legalActions(g).canCheck ? 'check' : 'fold' }, now);
 }
 
+/* ---------------- retiring ---------------- */
+// The seat leaves the tournament at once, at any moment (also when it is not its turn, or it is all-in). Its hand is folded (chips already in
+// the pot stay there as dead money), its remaining stack leaves play into g.forfeited, and it takes the worst place still open.
+// Chip invariant: sum(stacks) + sum(total) + forfeited === 3 * the starting stack. Throws EngineError('game_over' | 'illegal' (already out)).
+export function forfeit(g, seat, now) {
+  if (g.over) throw new EngineError('game_over');
+  if (!SEATS.includes(seat) || g.seats[seat].out) throw new EngineError('illegal', 'seat is already out');
+  const st = g.seats[seat], inHand = !g.folded[seat], wasTurn = g.toAct === seat, turn = g.toAct;
+  log(g, `{${seat}} retires`);
+  g.folded[seat] = true; g.needAct[seat] = false;
+  g.forfeited = (g.forfeited || 0) + st.stack; st.stack = 0;
+  g.places[seat] = SEATS.filter(s => !g.seats[s].out).length;   // 3rd if all three were alive, 2nd when heads-up
+  st.out = true;
+  g.ver++;
+  if (inHand) {
+    // finishHand deals the next hand itself, so the seat is already marked out above
+    if (wasTurn) progress(g, now, seat);
+    else if (turn != null) progress(g, now, (turn + 2) % 3);   // keep the seat to act where it is, unless the hand is now decided
+  }
+  const left = SEATS.filter(s => !g.seats[s].out);
+  if (!g.over && left.length === 1) {                           // (only reachable if no hand was running)
+    const w = left[0];
+    g.over = true; g.winner = w; g.places[w] = 1; g.holes = [null, null, null]; g.toAct = null;
+    log(g, `{${w}} wins the tournament`);
+  }
+  return g;
+}
+
 /* ---------------- end of hand ---------------- */
 function finishHand(g, now) {
   const start = g.handStart, alive = SEATS.filter(i => !g.folded[i]);
-  // uncalled part of the biggest contribution goes back to its owner
-  const byTotal = SEATS.slice().sort((a, b) => g.total[b] - g.total[a]);
+  // uncalled part of the biggest contribution goes back to its owner (only a seat still in the hand: chips of a folded or retired seat stay in the pot)
   let uncalled = null;
-  const over0 = g.total[byTotal[0]] - g.total[byTotal[1]];
+  const top = alive.slice().sort((a, b) => g.total[b] - g.total[a])[0];
+  const over0 = g.total[top] - Math.max(...SEATS.filter(s => s !== top).map(s => g.total[s]));
   if (over0 > 0) {
-    const s = byTotal[0];
-    g.seats[s].stack += over0; g.total[s] -= over0; uncalled = { seat: s, amount: over0 };
-    log(g, `Uncalled bet ${over0} returned to {${s}}`);
+    g.seats[top].stack += over0; g.total[top] -= over0; uncalled = { seat: top, amount: over0 };
+    log(g, `Uncalled bet ${over0} returned to {${top}}`);
   }
   // pots: one layer per distinct contribution level, adjacent layers with the same eligible seats are merged
   const levels = [...new Set(g.total.filter(t => t > 0))].sort((a, b) => a - b);

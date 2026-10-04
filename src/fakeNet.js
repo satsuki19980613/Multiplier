@@ -110,12 +110,13 @@ export async function game(body){
       return{waiting:waiting(body.stake),since:Q.since,game:null,now:Date.now()};
     }
     case'leave':Q=null;return{ok:true};
-    case'act':case'tick':{
+    case'act':case'tick':case'retire':{
       if(!G||body.game!==G.id)throw new MoveError('not_found');
       if(G.status!=='active')throw new MoveError('game_over');
       const cur={state:G.game.state,meta:G.game.meta};
       let step;
       if(body.op==='act')step=applyRequest(cur,G.seat,{op:'act',ver:body.ver,move:body.move},Date.now());
+      else if(body.op==='retire')step=applyRequest(cur,G.seat,{op:'retire'},Date.now());
       else{
         if(IDLE&&G.game.meta.bots[actor(cur.state)])throw new MoveError('not_yet');
         step=tick(cur,Date.now(),{botMove,rnd:Math.random});

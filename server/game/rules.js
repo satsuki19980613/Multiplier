@@ -6,7 +6,7 @@
 //   state = the engine state `g` (JSON, includes the deck: server only)
 //   meta  = { stake, buyIn, multiplier, prize, bots: [null | { persona }] x3 (private), clock, result }
 //   clock = { turnStart, deadline, timebank: [ms x3], strikes: [x3], botAt }
-import{newGame,actor,applyAction,autoAction,EngineError}from'../../src/engine.js';
+import{newGame,actor,applyAction,autoAction,forfeit,EngineError}from'../../src/engine.js';
 import{viewFor}from'../../src/view.js';
 import{STAKES,FREEROLL,drawMultiplier,structureFor}from'../../src/spin.js';
 
@@ -113,9 +113,22 @@ function afterMove(before,state,now,seat,kind){
   return clockAt(state,meta,{...c,timebank,strikes},now+bonus);
 }
 
-/** Apply a human's request. game = { state, meta }; req = { op:'act', ver, move }. => { state, clock }. Throws MoveError.
+// a human retires: the seat leaves the tournament at once (see engine forfeit). Works on any turn. The buy-in is not refunded and nothing is paid.
+function retire(game,seat,now){
+  if(game.state.over)throw new MoveError('game_over');
+  if(!Number.isInteger(seat)||seat<0||seat>2||game.meta.bots[seat])throw new MoveError('not_found');
+  if(game.state.places[seat]!==null)throw new MoveError('already_out');
+  const before=game.state,g=clone(before);
+  engineCall(()=>forfeit(g,seat,now));
+  // the player to act (and so the running turn clock) stays as it is unless the retire changed the hand
+  const same=!g.over&&actor(g)===actor(before)&&g.handNo===before.handNo&&g.street===before.street;
+  return{state:g,clock:same?game.meta.clock:afterMove(game,g,now,seat,'retire')};
+}
+
+/** Apply a human's request. game = { state, meta }; req = { op:'act', ver, move } or { op:'retire' }. => { state, clock }. Throws MoveError.
  *  The stored game is not mutated. */
 export function applyRequest(game,seat,req,now){
+  if(req&&req.op==='retire')return retire(game,seat,now);
   if(!req||req.op!=='act')throw new MoveError('illegal');
   if(game.state.over)throw new MoveError('game_over');
   if(!Number.isInteger(seat)||seat<0||seat>2||game.meta.bots[seat])throw new MoveError('not_your_turn');

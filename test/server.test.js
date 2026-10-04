@@ -310,6 +310,125 @@ test('a human who is eliminated ends the game when only bots are left; eliminate
   assert.equal(ended,12);assert.ok(bustedFirst>0,'at least one game where the human lost');
 });
 
+// ---- retire ----
+const sumChips=st=>st.seats.reduce((a,x)=>a+x.stack,0)+st.total.reduce((a,x)=>a+x,0)+(st.forfeited||0);
+const retireReq=(g,seat,now)=>{const r=applyRequest(g,seat,{op:'retire'},now);return commit(g,r)};
+
+test('retire: a human leaves mid-hand (even when it is not their turn); the others carry on and the buy-in is not refunded',()=>{
+  const t=mk([human(0),human(1),human(2)]),g=stored(t),a=actor(t.state),other=(a+1)%3,now=T0+WHEEL_MS+1000,before=JSON.stringify(g);
+  const total=sumChips(t.state),clock0=t.meta.clock;
+  const out=retireReq(g,other,now);                      // not their turn
+  assert.equal(JSON.stringify(g),before,'the stored game is not mutated');
+  assert.equal(out.state.places[other],3);assert.ok(out.state.seats[other].out&&out.state.folded[other]);
+  assert.ok(!out.state.over&&out.payouts===null);assert.equal(actor(out.state),a,'the turn stays');
+  assert.deepEqual(out.meta.clock,clock0,'the running turn clock is not reset by someone else leaving');
+  assert.ok(!humanAlive(out.state,out.meta,other)&&humanAlive(out.state,out.meta,a));
+  assert.equal(sumChips(out.state),total);assert.ok(out.state.forfeited>0);
+  assert.equal(out.meta.result,null);
+  // views: the retiree still gets a view with their place; the others see them out
+  const v=viewsOf(out.state,out.meta);assert.equal(v[other].places[other],3);assert.equal(v[a].seats[other].out,true);assert.equal(v[a].holes[other],null);
+  // the player whose turn it was keeps playing normally
+  const g2={state:out.state,meta:out.meta},r=applyRequest(g2,a,{op:'act',ver:out.state.ver,move:{type:'fold'}},now+500);
+  assert.ok(r.state.handNo>=out.state.handNo);assert.equal(sumChips(r.state),total);
+  // on their own turn: a fold + leave in one request
+  const own=retireReq(g,a,now);assert.equal(own.state.places[a],3);assert.ok(!own.state.over);assert.notEqual(actor(own.state),a);
+  assert.equal(own.meta.clock.turnStart,now,"the next actor's clock starts now");
+});
+
+test('retire: refused when the game is over, when the seat is a bot, or when the player is already out',()=>{
+  const t=mk([human(0),bot('tight'),human(2)]),g=stored(t),now=T0+WHEEL_MS+1000;
+  assert.equal(errCode(()=>applyRequest(g,1,{op:'retire'},now)),'not_found','a bot seat cannot retire');
+  assert.equal(errCode(()=>applyRequest(g,5,{op:'retire'},now)),'not_found');
+  assert.equal(errCode(()=>applyRequest(g,-1,{op:'retire'},now)),'not_found');
+  const r=retireReq(g,0,now),g2={state:r.state,meta:r.meta};
+  assert.equal(errCode(()=>applyRequest(g2,0,{op:'retire'},now+1)),'already_out');
+  assert.equal(errCode(()=>applyRequest(g2,0,{op:'act',ver:r.state.ver,move:{type:'fold'}},now+1)),'not_your_turn');
+  const over=structuredClone(t.state);over.over=true;
+  assert.equal(errCode(()=>applyRequest({state:over,meta:t.meta},0,{op:'retire'},now)),'game_over');
+});
+
+test('retire: the only human leaves -> only bots remain, the table is finished at once and nobody is paid; the retiree is last',()=>{
+  const t=mk([human(0),bot('tight'),bot('aggro')],'low',3),now=T0+WHEEL_MS+1000;
+  const out=retireReq(stored(t),0,now);
+  assert.ok(out.state.over);assert.equal(out.state.places[0],3);assert.deepEqual(out.state.places.slice().sort(),[1,2,3]);
+  assert.ok(t.meta.bots[out.state.winner]);assert.deepEqual(out.payouts,[0,0,0]);
+  assert.equal(out.meta.result.places[0],3);assert.deepEqual(out.meta.result.payouts,[0,0,0]);
+  assert.equal(out.meta.clock.deadline,null);assert.equal(out.meta.clock.botAt,null);
+  assert.equal(sumChips(out.state),sumChips(t.state));
+  // retiring while a bot is to act works the same way
+  for(let seed=1;seed<=20;seed++){
+    const u=mk([bot('tight'),human(1),bot('aggro')],'low',seed),o=retireReq(stored(u),1,now);
+    assert.ok(o.state.over&&o.state.places[1]===3&&o.payouts.every(p=>p===0));
+  }
+});
+
+test('retire: heads-up against a bot, the human leaves -> the bot wins and the human is 2nd',()=>{
+  // seat 2 (a bot) is out already (place 3)
+  const t=mk([human(0),bot('tight'),bot('aggro')],'low',4),st=structuredClone(t.state);
+  st.seats[2]={stack:0,out:true};st.places[2]=3;st.seats[1].stack+=st.seats[2].stack;
+  const o=retireReq({state:st,meta:t.meta},0,T0+WHEEL_MS+1000);
+  assert.ok(o.state.over);assert.equal(o.state.winner,1);assert.deepEqual(o.state.places,[2,1,3]);assert.deepEqual(o.payouts,[0,0,0]);
+});
+
+test('retire: two humans, one leaves and the other keeps playing; the stayer is paid if they win',()=>{
+  let g=stored(mk([human(0),human(1),bot('loose')],'low',6)),now=T0+WHEEL_MS+1000;
+  const total=sumChips(g.state);
+  const o=retireReq(g,0,now);g={state:o.state,meta:o.meta};
+  assert.ok(!g.state.over);assert.equal(g.state.places[0],3);assert.ok(humanAlive(g.state,g.meta,1));
+  let n=0;
+  while(!g.state.over&&n++<5000){
+    now+=100000;
+    const r=tick(g,now,{botMove,rnd:rndFor(n)});
+    const c=commit(g,r);g={state:c.state,meta:c.meta};
+    assert.equal(sumChips(g.state),total);
+  }
+  assert.ok(g.state.over);assert.deepEqual(g.state.places.slice().sort(),[1,2,3]);assert.equal(g.state.places[0],3);
+  const s=settle(g.state,g.meta);
+  assert.equal(s.payouts[0],0);assert.equal(s.payouts[1],g.state.winner===1?g.meta.prize:0);
+  assert.equal(g.meta.result.places[0],3);
+});
+
+test('retire: random tables - a retire at any moment keeps chips conserved, leaves a valid actor and a consistent game',()=>{
+  for(let seed=1;seed<=60;seed++){
+    const rnd=rndFor(seed*17);let g=stored(mk([human(0),human(1),human(2)],'low',seed)),now=T0+WHEEL_MS+1000;
+    const total=sumChips(g.state);let n=0;
+    while(!g.state.over&&n++<4000){
+      now+=2000;
+      if(rnd()<0.04){
+        const alive=[0,1,2].filter(s=>humanAlive(g.state,g.meta,s)),who=alive[Math.floor(rnd()*alive.length)];
+        const c=retireReq(g,who,now);g={state:c.state,meta:c.meta};
+        assert.ok(g.state.places[who]!==null&&!humanAlive(g.state,g.meta,who));
+        assert.equal(sumChips(g.state),total);
+        if(!g.state.over){const a=actor(g.state);assert.ok(a!==null&&!g.state.seats[a].out&&!g.state.folded[a])}
+        continue;
+      }
+      const a=actor(g.state),L=legalActions(viewFor(g.state,a));
+      const r=applyRequest(g,a,{op:'act',ver:g.state.ver,move:{type:L.canCheck?'check':rnd()<0.5?'call':'fold'}},now);
+      g={state:r.state,meta:{...g.meta,clock:r.clock}};
+    }
+    assert.ok(g.state.over,'seed '+seed);assert.deepEqual(g.state.places.slice().sort(),[1,2,3]);
+  }
+});
+
+test('fakeNet: retire mid-hand frees the player at once (me().game is null), a second retire is refused, a new table can be joined',async()=>{
+  const realSet=globalThis.setTimeout;
+  globalThis.location={search:'?fake&wait=0&chips=5'};
+  globalThis.setTimeout=(f,ms,...a)=>realSet(f,ms>=100&&ms<=220?0:ms,...a);
+  try{
+    const{rpc,game}=await import('../src/fakeNet.js?retire');
+    const q=await game({op:'queue',stake:'free'});assert.ok(q.game);
+    assert.equal((await rpc('me')).game,q.game);
+    await assert.rejects(()=>game({op:'retire',game:'00000000-0000-4000-8000-000000000000'}),e=>e.code==='not_found');
+    const r=await game({op:'retire',game:q.game});
+    assert.equal(r.view.places[r.view.meta.seat],3);
+    assert.ok(r.view.over,'only bots left: the table is over');assert.deepEqual(r.view.meta.result.payouts,[0,0,0]);
+    assert.equal((await rpc('me')).game,null);
+    await assert.rejects(()=>game({op:'retire',game:q.game}),e=>e.code==='game_over');
+    const poll=await rpc('game_poll',{p_game:q.game,p_ver:-1});assert.ok(poll.view,'the retired player can still poll the table');
+    const q2=await game({op:'queue',stake:'free'});assert.ok(q2.game&&q2.game!==q.game);
+  }finally{globalThis.setTimeout=realSet;delete globalThis.location}
+});
+
 // ---- fakeNet (browser stand-in) ----
 test('fakeNet: an eliminated player is out of the table at once (me().game is null, queue starts a new table)',async()=>{
   const realSet=globalThis.setTimeout,realNow=Date.now;let skew=0;
@@ -347,6 +466,7 @@ const handler=createHandler({
   queue:async(uid,stake)=>{calls.push(['queue',uid,stake]);if(stake==='high')throw new MoveError('locked_stake');return{waiting:{low:1,mid:0,high:0,free:0},since:1,game:null}},
   leave:async uid=>{calls.push(['leave',uid]);return{ok:true}},
   act:async(uid,game,body)=>{calls.push(['act',uid,game,body]);if(body.ver===0)throw new MoveError('stale');return{ver:2,now:0,view:{op:'act'}}},
+  retire:async(uid,game)=>{calls.push(['retire',uid,game]);if(game===GID.replace('aa','bb'))throw new MoveError('already_out');return{ver:4,now:0,view:{op:'retire'}}},
   tick:async(uid,game)=>{if(game===GID.replace('aa','bb'))throw new MoveError('not_yet');if(game===GID.replace('aa','cc'))throw new Error('db down');return{ver:3,now:0,view:{op:'tick'}}},
   logError:()=>{},
 });
@@ -383,6 +503,9 @@ test('HTTP: routing, validation and error codes',async()=>{
   const a=await req({op:'act',game:GID,ver:1,move:{type:'raise',to:40},junk:1});assert.equal(a.status,200);assert.deepEqual((await a.json()).view,{op:'act'});
   assert.deepEqual(calls.at(-1),['act',U,GID,{ver:1,move:{type:'raise',to:40}}],'only the whitelisted fields are passed on');
   const st=await req({op:'act',game:GID,ver:0,move:{type:'fold'}});assert.equal(st.status,409);assert.deepEqual(await st.json(),{error:'stale'});
+  assert.equal((await req({op:'retire',game:'nope'})).status,422);assert.equal((await req({op:'retire'})).status,422);
+  const rt=await req({op:'retire',game:GID,junk:1});assert.equal(rt.status,200);assert.deepEqual((await rt.json()).view,{op:'retire'});assert.deepEqual(calls.at(-1),['retire',U,GID]);
+  const ro=await req({op:'retire',game:GID.replace('aa','bb')});assert.equal(ro.status,409);assert.deepEqual(await ro.json(),{error:'already_out'});
   assert.equal((await req({op:'tick',game:'nope'})).status,422);
   assert.equal((await req({op:'tick',game:GID})).status,200);
   const ny=await req({op:'tick',game:GID.replace('aa','bb')});assert.equal(ny.status,409);assert.deepEqual(await ny.json(),{error:'not_yet'});
@@ -392,7 +515,7 @@ test('HTTP: routing, validation and error codes',async()=>{
 
 test('HTTP: every MoveError code has a status; unknown codes are 422',async()=>{
   const{STATUS}=await import('../server/game/handler.js');
-  for(const c of['not_found','gone','stale','not_yet','game_over','not_your_turn','busy','no_profile','insufficient_chips','freeroll_unavailable','locked_stake','illegal'])
+  for(const c of['not_found','gone','stale','not_yet','game_over','already_out','not_your_turn','busy','no_profile','insufficient_chips','freeroll_unavailable','locked_stake','illegal'])
     assert.ok(Number.isInteger(STATUS[c]),c);
   assert.equal(STATUS.not_found,404);assert.equal(STATUS.no_profile,403);
 });

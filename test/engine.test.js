@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  newGame, actor, legalActions, applyAction, autoAction, levelAt, eval7, handName, EngineError, RANKCH, cardStr, chachaBlock,
+  newGame, actor, legalActions, applyAction, autoAction, forfeit, levelAt, eval7, handName, EngineError, RANKCH, cardStr, chachaBlock,
 } from '../src/engine.js';
 import { viewFor } from '../src/view.js';
 import { BLINDS } from '../src/spin.js';
@@ -141,7 +141,7 @@ function rig(g, holes, board) {
 }
 const A = (g, seat, type, to, now = 0) => applyAction(g, seat, to == null ? { type } : { type, to }, now);
 const mk = (stacks, button, extra = {}) => newGame({ stacks, button, levelMs: 60000, now: 0, rnd: mulberry(99), ...extra });
-const conserved = (g, total) => sum(g.seats.map(s => s.stack)) + sum(g.total) === total;
+const conserved = (g, total) => sum(g.seats.map(s => s.stack)) + sum(g.total) + (g.forfeited || 0) === total;
 const BOARD = '2c 7h 9d Jc 3s';
 
 /* ---------------- blinds, order of action ---------------- */
@@ -412,6 +412,113 @@ test('one bust leaves a heads-up game that continues; later bust takes place 2',
   assert.ok(conserved(g, 1200));
 });
 
+/* ---------------- retiring (forfeit) ---------------- */
+test('retire on its own turn: a normal fold, the seat leaves with the worst place and its stack is taken out of play', () => {
+  const g = mk([1000, 1000, 1000], 0), v0 = g.ver;
+  assert.equal(actor(g), 0);
+  forfeit(g, 0, 5);
+  assert.ok(g.seats[0].out && g.folded[0] && g.seats[0].stack === 0);
+  assert.equal(g.places[0], 3); assert.equal(g.forfeited, 1000); assert.ok(g.ver > v0);
+  assert.ok(!g.over); assert.equal(actor(g), 1, 'the hand goes on with the next seat');
+  assert.ok(g.log.some(e => e.text === '{0} retires'));
+  assert.ok(conserved(g, 3000));
+  A(g, 1, 'call'); A(g, 2, 'check');                       // the rest of the hand is played normally, heads-up from the flop
+  while (g.handNo === 1) A(g, actor(g), 'check');
+  assert.equal(g.handNo, 2); assert.ok(g.folded[0] && g.seats[0].out); assert.notEqual(actor(g), 0); assert.notEqual(g.button, 0);
+  assert.ok(conserved(g, 3000));
+});
+
+test('retire when it is another seat\'s turn: the seat folds at once, the turn stays, its chips in the pot are dead money for the others', () => {
+  const g = mk([1000, 1000, 1000], 0);
+  assert.equal(actor(g), 0);
+  forfeit(g, 2, 5);                                        // the BB (20 in the pot) retires while the button must act
+  assert.ok(g.seats[2].out && g.places[2] === 3 && g.forfeited === 980);
+  assert.equal(actor(g), 0, 'seat 0 is still to act'); assert.ok(!g.over); assert.deepEqual(g.total, [0, 10, 20]);
+  assert.ok(conserved(g, 3000));
+  A(g, 0, 'fold');                                         // only seat 1 is left in the hand: it takes everything, including the retiree's BB
+  const h = g.lastHand;
+  assert.deepEqual(h.pots, [{ amount: 30, eligible: [1], winners: [1] }]); assert.equal(h.uncalled, null);
+  assert.deepEqual(g.handStart, [1000, 1020, 0]); assert.equal(g.handNo, 2);
+  assert.ok(!g.over); assert.ok(conserved(g, 3000));
+  assert.ok([0, 1].includes(actor(g)) && !g.seats[actor(g)].out);
+});
+
+test('retire when nobody else can still act in the street: the hand ends right away', () => {
+  const g = mk([1000, 1000, 1000], 0);
+  A(g, 0, 'fold');                                         // SB (seat 1) to act, BB (seat 2) has the option
+  assert.equal(actor(g), 1);
+  forfeit(g, 2, 5);                                        // BB retires: seat 1 is alone
+  assert.equal(g.lastHand.handNo, 1); assert.deepEqual(g.lastHand.pots[0].winners, [1]);
+  assert.equal(g.handStart[1], 1000 - 10 + 30); assert.equal(g.handNo, 2); assert.ok(conserved(g, 3000));
+});
+
+test('retire while all-in: the claim to the pot is gone even with the best hand; the chips already in stay as dead money', () => {
+  const g = mk([500, 1000, 1000], 0);
+  rig(g, { 0: 'As Ad', 1: 'Ks Kd', 2: 'Qs Qd' }, BOARD);
+  A(g, 0, 'raise', 500); A(g, 1, 'call');
+  assert.ok(g.allIn[0]); assert.equal(actor(g), 2);
+  forfeit(g, 0, 5);
+  assert.ok(g.seats[0].out && g.folded[0]); assert.equal(g.places[0], 3); assert.equal(g.forfeited, 0, 'an all-in seat has no stack left');
+  assert.equal(actor(g), 2); assert.ok(conserved(g, 2500));
+  A(g, 2, 'call');
+  while (g.handNo === 1) A(g, actor(g), 'check');
+  const h = g.lastHand;
+  assert.deepEqual(h.pots.map(p => [p.amount, p.eligible, p.winners]), [[1500, [1, 2], [1]]]);
+  assert.deepEqual(g.handStart, [0, 2000, 500]); assert.ok(!g.over); assert.ok(conserved(g, 2500));
+});
+
+test('retire while the other two are all-in against each other: nobody is left to act, the hand ends', () => {
+  const g = mk([500, 500, 1000], 0);
+  rig(g, { 0: 'Qs Qd', 1: 'Ks Kd', 2: 'As Ad' }, BOARD);
+  A(g, 0, 'raise', 500); A(g, 1, 'call');                  // seat 2 (BB, 1000 behind) is to act
+  forfeit(g, 2, 5);
+  assert.equal(g.lastHand.handNo, 1);                      // 0 and 1 are all-in: the board runs out and seat 1 (KK) beats seat 0
+  assert.deepEqual(g.places.map(p => p), [2, 1, 3]); assert.ok(g.over); assert.equal(g.winner, 1);
+  assert.equal(g.seats[1].stack, 1020); assert.equal(g.forfeited, 980); assert.ok(conserved(g, 2000));
+});
+
+test('heads-up: retiring ends the game at once, whoever\'s turn it is', () => {
+  let g = mk([1000, 1000, 0], 0);
+  assert.deepEqual(g.places, [null, null, 3]); assert.equal(actor(g), 0);
+  forfeit(g, 0, 5);                                        // on its own turn
+  assert.ok(g.over); assert.equal(g.winner, 1); assert.deepEqual(g.places, [2, 1, 3]);
+  assert.equal(actor(g), null); assert.equal(g.seats[1].stack, 1010); assert.equal(g.forfeited, 990); assert.deepEqual(g.total, [0, 0, 0]);
+  assert.ok(conserved(g, 2000)); assert.ok(g.log.some(e => e.text === '{1} wins the tournament'));
+  g = mk([1000, 1000, 0], 0);
+  forfeit(g, 1, 5);                                        // the other one retires on the button's turn
+  assert.ok(g.over); assert.equal(g.winner, 0); assert.deepEqual(g.places, [1, 2, 3]);
+  assert.equal(g.seats[0].stack, 1020); assert.equal(g.forfeited, 980); assert.ok(conserved(g, 2000));
+  assert.throws(() => forfeit(g, 0, 6), e => e.code === 'game_over');
+});
+
+test('places: first to retire among three is 3rd, then 2nd; a retire in the same hand as a bust ranks the bust above it', () => {
+  const g = mk([1000, 1000, 1000], 0);
+  forfeit(g, 2, 1);
+  assert.deepEqual(g.places, [null, null, 3]);
+  forfeit(g, actor(g), 2);                                 // the heads-up seat to act retires too
+  assert.ok(g.over); assert.equal(g.places.filter(p => p === 2).length, 1); assert.equal(g.places[2], 3); assert.deepEqual(g.places.slice().sort(), [1, 2, 3]);
+  assert.ok(conserved(g, 3000));
+  const h = mk([200, 500, 500], 0);
+  rig(h, { 0: 'Qs Qd', 1: 'Ks Kd', 2: 'As Ad' }, BOARD);
+  A(h, 0, 'raise', 200);
+  forfeit(h, 2, 3);                                        // BB retires (3rd) ...
+  A(h, 1, 'call');                                         // ... seat 0 busts in the hand (2nd) and seat 1 wins everything left, dead BB included
+  assert.deepEqual(h.places, [2, 1, 3]); assert.ok(h.over); assert.equal(h.seats[1].stack, 720); assert.equal(h.forfeited, 480); assert.ok(conserved(h, 1200));
+});
+
+test('retire: errors and state', () => {
+  const g = mk([1000, 1000, 1000], 0);
+  forfeit(g, 1, 1);
+  assert.throws(() => forfeit(g, 1, 2), e => e instanceof EngineError && e.code === 'illegal', 'already out');
+  assert.throws(() => forfeit(g, 3, 2), e => e instanceof EngineError && e.code === 'illegal');
+  assert.throws(() => applyAction(g, 1, { type: 'fold' }, 2), e => e.code === 'not_your_turn');
+  const copy = JSON.parse(JSON.stringify(g));              // the state (with `forfeited`) survives a JSON round trip and play goes on
+  assert.equal(copy.forfeited, 990);
+  const a = actor(copy); A(copy, a, 'fold');
+  assert.ok(conserved(copy, 3000));
+  assert.equal(newGame({ stack: 300, levelMs: 1, now: 0, rnd: mulberry(5) }).forfeited, 0);
+});
+
 /* ---------------- short stacks ---------------- */
 test('a player who cannot cover the blind posts what is left and is all-in', () => {
   const g = mk([5, 1000, 1000], 2);                      // SB seat 0 has only 5
@@ -509,17 +616,17 @@ test('ver increases with every applied action', () => {
 });
 
 /* ---------------- invariant fuzzing ---------------- */
-function playTournament(i, check = true) {
+function playTournament(i, check = true, forfeitP = 0) {
   const rnd = mulberry(i * 7919 + 13), stack = [300, 500, 2000][i % 3];
   let now = i * 1000;
   const g = newGame({ stack, levelMs: [60000, 120000][i % 2], now, rnd: mulberry(i + 1) });
-  let gg = g, steps = 0;
+  let gg = g, steps = 0, fHand = 0;                        // fHand: chips forfeited when the current hand started
   const total = 3 * stack;
   while (!gg.over) {
     assert.ok(steps++ < 40000, 'tournament must finish');
     const a = actor(gg), l = legalActions(gg);
     if (check) {
-      assert.ok(conserved(gg, total), 'chips are conserved');
+      assert.ok(conserved(gg, total), 'chips are conserved (stacks + pot + forfeited)');
       assert.ok(gg.seats.every(s => s.stack >= 0) && gg.total.every(t => t >= 0));
       assert.ok(a != null && l.seat === a);
       assert.ok(!gg.folded[a] && !gg.allIn[a] && !gg.seats[a].out && gg.seats[a].stack > 0, 'the actor can act');
@@ -529,6 +636,17 @@ function playTournament(i, check = true) {
       assert.equal(gg.deck.length + gg.holes.filter(Boolean).length * 2 + gg.board.length + (gg.board.length ? 1 + (gg.board.length - 3) : 0), 52, 'cards accounted for');
       if (steps % 7 === 0) assert.deepEqual(legalActions(viewFor(gg, a)), l, 'view gives the same legal actions');
     }
+    if (forfeitP && rnd() < forfeitP) {                  // somebody retires: any alive seat, whoever's turn it is
+      const alive = [0, 1, 2].filter(x => !gg.seats[x].out), who = alive[Math.floor(rnd() * alive.length)];
+      const lh0 = gg.lastHand, hn0 = gg.handNo, f0 = gg.forfeited, stackBefore = gg.seats[who].stack;
+      forfeit(gg, who, now);
+      if (check) {
+        assert.equal(gg.forfeited, f0 + stackBefore, 'the retiree stack leaves play'); assert.equal(gg.seats[who].stack, 0); assert.ok(gg.seats[who].out && gg.places[who] != null);
+        if (gg.lastHand !== lh0) assert.equal(sum(gg.lastHand.net), gg.lastHand.handNo === hn0 ? fHand - gg.forfeited : 0, 'only the retired stacks are missing from the hand');
+      }
+      if (gg.lastHand !== lh0) fHand = gg.forfeited;
+      continue;
+    }
     // choose a move: mostly random legal moves, sometimes the timeout action, sometimes shoves
     const r = rnd(); let move;
     if (r < 0.12) move = null;
@@ -537,21 +655,23 @@ function playTournament(i, check = true) {
     else if (l.minRaiseTo != null) move = { type: 'raise', to: rnd() < 0.25 ? l.maxRaiseTo : l.minRaiseTo + Math.floor(rnd() * (l.maxRaiseTo - l.minRaiseTo + 1)) };
     else move = { type: l.canCheck ? 'check' : 'call' };
     now += Math.floor(rnd() * [400, 1500, 4000][i % 3]);     // slow, medium and fast blind growth
-    const lh = gg.lastHand;
+    const lh = gg.lastHand, hn0 = gg.handNo;               // (several hands can end inside one action when blinds put people all-in)
     if (move) applyAction(gg, a, move, now); else autoAction(gg, a, now);
     if (steps % 40 === 0) gg = JSON.parse(JSON.stringify(gg));        // keep going from a serialised copy
     if (check && gg.lastHand !== lh && gg.lastHand && (!lh || gg.lastHand.handNo !== lh.handNo)) {
       const h = gg.lastHand;
-      assert.equal(sum(h.net), 0, 'a hand is zero-sum');
+      assert.equal(sum(h.net), h.handNo === hn0 ? fHand - gg.forfeited : 0, 'a hand is zero-sum (except the chips a retiree took out of play)');
       for (const p of h.pots) { assert.ok(p.winners.length > 0 && p.winners.every(w => p.eligible.includes(w))); assert.ok(p.amount > 0); }
+      fHand = gg.forfeited;
     }
   }
   if (check) {
     assert.deepEqual(gg.places.slice().sort(), [1, 2, 3], 'places 1, 2, 3 are all filled');
     assert.equal(gg.places[gg.winner], 1);
-    assert.equal(gg.seats[gg.winner].stack, total, 'the winner has all the chips');
+    assert.equal(gg.seats[gg.winner].stack, total - (gg.forfeited || 0), 'the winner has all the chips still in play');
     assert.ok(gg.seats.every((s, k) => k === gg.winner || (s.stack === 0 && s.out)));
     assert.deepEqual(gg.total, [0, 0, 0]); assert.equal(actor(gg), null);
+    assert.ok(conserved(gg, total));
     assert.ok(gg.log.every(e => !/\b(YOU|Player)\b/.test(e.text)), 'the shared log uses seat placeholders only');
   }
   return gg;
@@ -564,6 +684,15 @@ test('fuzz: 1500 tournaments with random legal actions and timeouts keep every i
   assert.equal(hu, 1500);
   assert.ok(hands > 1500 * 5, 'tournaments last several hands (' + hands + ')');
   assert.ok(Date.now() - t0 < 40000, 'fast enough');
+});
+
+test('fuzz: 1500 tournaments with random retirements keep every invariant (stacks + pot + forfeited = 3 * start)', () => {
+  let retired = 0, midHand = 0;
+  for (let i = 0; i < 1500; i++) {
+    const g = playTournament(i, true, 0.02);
+    retired += g.forfeited > 0 ? 1 : 0; midHand += g.log.filter(e => /retires/.test(e.text)).length;
+  }
+  assert.ok(retired > 300 && midHand > 400, `retirements happen often enough (${retired}, ${midHand})`);
 });
 
 test('fuzz: same seeds replay to exactly the same tournament', () => {

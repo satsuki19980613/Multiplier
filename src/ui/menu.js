@@ -64,7 +64,6 @@ function mainHTML() {
   const p = app.prof, fr = freeState();
   return `${wordmark}
     <div class="acct"><button class="who-me" id="meBtn" type="button" aria-label="Profile"><i class="gem" style="width:9px;height:9px;transform:rotate(45deg);background:linear-gradient(135deg,#fff,var(--you) 65%)"></i><span class="nick">${esc(p.nickname)}</span><span class="bal"><small>CHIPS</small>${fmt(p.chips)}</span></button></div>
-    ${p.game ? `<button class="mbtn resume" id="resumeBtn" type="button"><span>CONTINUE<small>進行中の卓</small></span><span class="rt">→</span></button>` : ''}
     <button class="mbtn" id="playBtn" type="button"><span>PLAY</span></button>
     <button class="mbtn" id="freeBtn" type="button" ${fr.ok ? '' : 'disabled'}><span>FREEROLL${fr.why ? `<small>${fr.why}</small>` : ''}</span><span class="rt">${fr.left}/${FREEROLL.perDay}</span></button>
     <button class="mbtn" id="rankBtn" type="button"><span>RANKING</span></button>
@@ -72,7 +71,6 @@ function mainHTML() {
 }
 function bindMain(el) {
   el.querySelector('#meBtn').onclick = openProfile;
-  const r = el.querySelector('#resumeBtn'); if (r) r.onclick = () => app.nav.enterGame(app.prof.game, { wheel: false });
   el.querySelector('#playBtn').onclick = () => setPane('stakes');
   el.querySelector('#freeBtn').onclick = () => startQueue('free');
   el.querySelector('#rankBtn').onclick = openRanking;

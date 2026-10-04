@@ -29,6 +29,7 @@ export function enter(id) {
   for (const id of ['#seatL', '#seatR', '#seatM', '#pot', '#boardC', '#tInfo', '#betM']) { const e = $(id); e.innerHTML = ''; e._h = null }
   renderLoading();
   document.body.dataset.screen = 'game';
+  syncRetire();
   refit();
   poll();
   T.tickTimer = setInterval(() => { maybeTick(); tickClock() }, 400);
@@ -39,10 +40,44 @@ export function leave() {
   T.dead = true; clearTimeout(T.timer); clearInterval(T.tickTimer); clearTimeout(T.revTimer); clearTimeout(T.platesTimer); cancelAnimationFrame(T.raf);
   document.querySelectorAll('.fly').forEach(e => e.remove());
   if ($('#overDlg').open) $('#overDlg').close();
+  if ($('#retireDlg').open) $('#retireDlg').close();
   T = null;
 }
 export const active = () => !!T;
 export function resultOpen() { return !!T && T.resultShown }
+
+/* ===================== retire ===================== */
+// The header's Retire button is the only way off the table while still seated: it shows until the player is out (retired, eliminated) or the game is over.
+function syncRetire() {
+  const b = $('#retireBtn'); if (!b) return;
+  const v = T && T.v, out = v && (v.over || v.places[T.me] != null);
+  b.hidden = !T || !!out || T.retiring;
+}
+export function askRetire() {
+  const t = T; if (!t || t.retiring || t.resultShown) return;
+  const dlg = $('#retireDlg');
+  $('#retireBody').innerHTML = head('RETIRE', 'リタイアしますか？') +
+    `<p>この卓から抜けます。バイインは戻りません。</p>
+    <div class="btns"><button class="btn ghost" data-act="cancel" type="button">Cancel</button><button class="btn danger" data-act="retire" type="button" id="retireOk">Retire</button></div>`;
+  $('#retireBody').onclick = async e => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    if (b.dataset.act === 'cancel') return dlg.close();
+    if (T !== t || t.retiring) return;
+    t.retiring = true; b.disabled = true; syncRetire();
+    try {
+      const r = await net().game({ op: 'retire', game: t.game });
+      if (T !== t) return;
+      t.retired = true; t.retiring = false; clock.offset = r.now - Date.now();
+      dlg.close(); apply(r.view); syncRetire();
+    } catch (err) {
+      if (T !== t) return;
+      t.retiring = false; syncRetire(); b.disabled = false;
+      if (['game_over', 'already_out', 'not_found'].includes(err.code)) { dlg.close(); t.retired = err.code === 'already_out'; poll() }   // the table moved on: just look at it again
+      else toast('通信エラー。もう一度');
+    }
+  };
+  openDlg('#retireDlg');
+}
 
 function renderLoading() {
   setHTML($('#dockMain'), '<span class="dk-title">…</span><span class="dots"><i></i><i></i><i></i></span>');
@@ -187,12 +222,13 @@ async function showResult() {
   const gain = place === 1 ? m.prize : 0, delta = gain - buy;
   const order = [0, 1, 2].map(s => ({ s, p: placeOf(v, s) ?? 9 })).sort((a, b) => a.p - b.p);
   const rows = order.map(({ s, p }) => `<li class="${s === me ? 'me-row' : ''}"><span class="pn">${p < 9 ? p : '–'}</span><span class="nm2">${s === me ? '<span class="me">YOU</span> ' : ''}${isBot(s) ? '<span class="bot-tag">Bot</span>' : ''}${esc(v.names[s])}</span><span class="pr">${p === 1 ? fmt(m.prize) : ''}</span></li>`).join('');
-  const draw = bal => `${head('RESULT', place === 1 ? 'Winner' : v.over ? 'Game over' : 'Eliminated', place === 1 ? 'c' : '')}
+  const retired = !!t.retired && place !== 1;
+  const draw = bal => `${head('RESULT', place === 1 ? 'Winner' : retired ? 'Retired' : v.over ? 'Game over' : 'Eliminated', place === 1 ? 'c' : '')}
     <div class="over-hd"><span class="place${place === 1 ? ' p1' : ''}">${place ?? '–'}<sup>${place ? ordinal(place).slice(String(place).length) : ''}</sup></span></div>
     <div class="over-gain ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'even'}">${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${fmt(Math.abs(delta))}<small>CHIPS</small></div>
     <ul class="over-rows">${rows}</ul>
     <div class="over-bal"><span>BALANCE</span><b id="ovBal">${bal == null ? '…' : fmt(bal)}</b></div>
-    <div class="btns">${v.over ? '' : '<button class="btn ghost" data-act="watch" type="button">Watch</button>'}<button class="btn ${v.over ? 'ghost' : 'ghost'}" data-act="menu" type="button">Menu</button><button class="btn primary" data-act="again" type="button" id="againBtn" ${v.over ? '' : 'disabled'}>Play again</button></div>`;
+    <div class="btns">${v.over || retired ? '' : '<button class="btn ghost" data-act="watch" type="button">Watch</button>'}<button class="btn ghost" data-act="menu" type="button">Menu</button><button class="btn primary" data-act="again" type="button" id="againBtn" ${v.over || retired ? '' : 'disabled'}>Play again</button></div>`;
   $('#overBody').innerHTML = draw(m.result && m.result.after && m.result.after[me] != null ? m.result.after[me] : null);
   const dlg = $('#overDlg'); if (!dlg.open) openDlg('#overDlg');
   $('#overBody').onclick = e => {
@@ -205,7 +241,7 @@ async function showResult() {
   const p = await app.nav.refreshMe();
   if (T !== t || !p) return;
   const bal = $('#ovBal'); if (bal) bal.textContent = fmt(p.chips);
-  if (v.over) {
+  if (v.over || retired) {
     const ok = stake === 'free' ? p.freeroll && p.freeroll.eligible : p.chips >= STAKES[stake].minChips && p.chips >= STAKES[stake].buyIn;
     const b = $('#againBtn'); if (b) b.disabled = !ok;
   }
@@ -244,6 +280,7 @@ function model() {
 function render() {
   const t = T; if (!t || !t.v) return;
   const M = model(), v = t.v, me = t.me, L = (me + 1) % 3, R = (me + 2) % 3;
+  syncRetire();
   let ch = renderInfo();
   ch = setHTML($('#seatL'), seatHTML(L, M, false)) || ch;
   ch = setHTML($('#seatR'), seatHTML(R, M, false)) || ch;
@@ -395,7 +432,7 @@ function renderDock(M) {
     idle = true;
     const inHand = !S.folded && !S.out && !v.seats[me].out;
     const a = v.toAct, who = a != null ? esc(v.names[a]) : '';
-    if (S.out) html = `<span class="dk-title">${S.place ? ordinal(S.place) : 'OUT'}</span><span class="dots"><i></i><i></i><i></i></span>`;
+    if (S.out) html = `<span class="dk-title">${S.place ? ordinal(S.place) : 'OUT'}</span><span class="dots"><i></i><i></i><i></i></span><button class="btn primary" data-act="result" type="button" style="flex:0 0 40%">Result</button>`;
     else {
       const armed = t.pre === autoPreKey();
       html = `${S.folded ? '<span class="eyebrow">FOLDED</span>' : ''}<span class="dk-title">${who}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>

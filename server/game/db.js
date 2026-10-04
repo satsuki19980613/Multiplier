@@ -1,7 +1,7 @@
 // Database side of the game server (runs as the database owner through DATABASE_URL). One request = one transaction.
 //   queue : advisory lock per stake -> profiles locked in uid order -> matching / bot fill -> buy-in -> INSERT games
 //   leave : delete from the queue
-//   act / tick : the games row is locked (for update); on the last move the prize is credited in the same transaction
+//   act / retire / tick : the games row is locked (for update); on the last move the prize is credited in the same transaction
 // Lock order everywhere: season lock -> stake lock -> profiles (sorted by uid, FOR NO KEY UPDATE) ; act: games row -> profiles.
 import{randomUUID}from'node:crypto';
 import{
@@ -147,6 +147,14 @@ export function makeDb(pool,deps={}){
     act:(uid,gameId,body)=>tx(pool,async c=>{
       const{seat,row}=await loadGame(c,uid,gameId);
       const step=applyRequest({state:row.g,meta:row.meta},seat,{op:'act',ver:body.ver,move:body.move},now());
+      return save(c,row,seat,step);
+    }),
+
+    // the player leaves the tournament now (buy-in stays spent). Works on any turn; the game row is saved like after a move, which frees the
+    // player (places set) and finishes a table that has no human left.
+    retire:(uid,gameId)=>tx(pool,async c=>{
+      const{seat,row}=await loadGame(c,uid,gameId);
+      const step=applyRequest({state:row.g,meta:row.meta},seat,{op:'retire'},now());
       return save(c,row,seat,step);
     }),
 

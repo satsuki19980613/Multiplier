@@ -64,6 +64,7 @@ export function applyAction(g, seat, move, now)          // move: { type: 'fold'
                                                           //   to = そのストリートで自分が出す合計額（「to」方式）。all-in は to = 自分の残り全部
                                                           //   違法なら EngineError を投げる。成功したら g.ver++
 export function autoAction(g, seat, now)                  // 時間切れの代打：check できれば check、できなければ fold
+export function forfeit(g, seat, now)                    // リタイア：その席は即座に卓から抜ける（いつでも・手番でなくても可。違法なら EngineError 'game_over' | 'illegal'(すでに脱落)）
 export function levelAt(g, now)                           // => その時刻のブラインドレベル番号（BLINDS の添字）
 export function eval7(cards)                              // 5〜7枚 => 整数スコア（大きいほど強い）
 export function handName(score)                           // => 'Full House' など（英語）
@@ -95,6 +96,7 @@ export { RANKCH, SUITCH, cardStr }                        // 表記用
     names: [handName|null x3], net: [delta x3], busted: [seats], endedAt
   },
   places: [p0,p1,p2],          // 確定した順位（1〜3）。未確定は null
+  forfeited,                   // リタイアした席の持ち越しスタックの合計（卓から消えたチップ）。不変条件: sum(stacks)+sum(total)+forfeited === 3*startStack
   over, winner,                // 終局フラグと優勝した席
   log: [{ text }],             // '{0}' '{1}' '{2}' は席番号のプレースホルダ（view.js の logText で名前に置換）
 }
@@ -154,6 +156,7 @@ export function settle(state, meta)                  // 終局時：=> { payouts
 | `queue` | `{ stake: 'low'\|'mid'\|'high'\|'free' }` | `{ waiting: {low,mid,high,free}, since, game: id\|null }`。待機登録（同じ stake のキューを更新）を行い、成立すれば卓を作る |
 | `leave` | `{}` | `{ ok: true }`。キューから抜ける |
 | `act` | `{ game, ver, move }` | `{ ver, now, view }` |
+| `retire` | `{ game }` | `{ ver, now, view }`。自分の席をリタイア（手番でなくても可。バイインは戻らず、賞金なし）。終局済みは 409 `game_over`、自席の順位が確定済みは 409 `already_out`、席が無ければ 404 `not_found` |
 | `tick` | `{ game }` | `{ ver, now, view }`（何も進まなければ 409 `not_yet`） |
 
 **マッチング**（`queue` の中で、stake 単位の advisory lock を取る）：
@@ -214,6 +217,7 @@ Data API RPC（`authenticated` にのみ公開。表は直接触らせない）�
   - 状態に `seed`（ChaCha20 の鍵、uint32×8）・`ctr`・`handAt`・`handStart`・`needAct`・`seen`・`lastHand.uncalled` を追加した。`viewFor` は `deck`・`seed`・`ctr` を消す。
   - `handName` は役名だけを返す。
 - **spin**: `seasonOf(...)` の `startsAt` / `endsAt` は `Date`。1〜3月は前年の H2 として扱う。
+- **リタイア**（2026-10-04）: `forfeit(g, seat, now)` はその席のハンドを即 fold（手番なら通常の fold。すでに出したチップはデッドマネーとして他の席に残り、コールされなかった超過分は生きている席にだけ返す）、残りスタックを `g.forfeited` に移し、`seats[seat].out = true`・順位は「まだ空いている一番下」（3人生存なら3位、ヘッズアップなら2位）。生存者が1人になれば終局。UI はテーブルからメニューへ戻る導線を持たず（着席中に抜けられるのは Retire か決着のみ）、`me().game` がある（着席中の）ときはメニューを描かずに卓へ自動復帰する。
 - **server**
   - DB の `games.state` は `{ g, meta }`。Bot の persona は meta にだけ持ち、ビューには出さない。
   - ビューの `meta` は `{ stake, buyIn, multiplier, prize, bot:[bool×3], clock, result, seat }`。

@@ -27,6 +27,7 @@ const handler=createHandler({
   queue:db.queue,
   leave:db.leave,
   act:db.act,
+  retire:db.retire,
   tick:db.tick,
   logError(m,e){console.error(m,e instanceof Error?`${e.name}: ${e.message}`:String(e))},
 });

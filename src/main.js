@@ -1,7 +1,7 @@
 // Multiplier — entry point: boot, screen switching, account. Screens live in src/ui/*.
 import * as realNet from './net.js';
 import { app, $, toast, closeAllDlg, localSet, REDUCE } from './ui/util.js';
-import { renderMenu, setPane, startQueue, cancelQueue } from './ui/menu.js';
+import { renderMenu, setPane, startQueue, cancelQueue, inQueue } from './ui/menu.js';
 import * as table from './ui/table.js';
 import { playWheel } from './ui/wheel.js';
 import { openRules } from './ui/rules.js';
@@ -18,15 +18,20 @@ function toMenu() {
   showScreen('menu'); setPane('main');
   if (app.user) refreshMe();
 }
+let entering = false;
 async function enterGame(id, opts = {}) {
-  closeAllDlg();
-  if (opts.wheel) {
-    try {
-      const v = await table.peek(id);
-      if (v && v.meta) await playWheel({ stake: v.meta.stake, multiplier: v.meta.multiplier, prize: v.meta.prize });
-    } catch (e) { /* the wheel is only a show: go to the table anyway */ }
-  }
-  table.enter(id);
+  if (entering) return;
+  entering = true;
+  try {
+    closeAllDlg();
+    if (opts.wheel) {
+      try {
+        const v = await table.peek(id);
+        if (v && v.meta) await playWheel({ stake: v.meta.stake, multiplier: v.meta.multiplier, prize: v.meta.prize });
+      } catch (e) { /* the wheel is only a show: go to the table anyway */ }
+    }
+    table.enter(id);
+  } finally { entering = false }
 }
 function playAgain(stake) {
   table.leave(); closeAllDlg(); showScreen('menu'); startQueue(stake);
@@ -36,6 +41,8 @@ function playAgain(stake) {
 async function refreshMe() {
   try { app.prof = await app.net.rpc('me') }
   catch (e) { if (e.code === 'not_authenticated') { app.user = null; app.prof = null } }
+  // still seated at a running table (e.g. after a reload): there is no way back to the menu except Retire or finishing, so go straight to the table
+  if (app.prof && app.prof.game && !table.active() && !inQueue() && !entering) { enterGame(app.prof.game, { wheel: false }); return app.prof }
   renderMenu();
   return app.prof;
 }
@@ -47,7 +54,7 @@ Object.assign(app.nav, { toMenu, enterGame, playAgain, refreshMe, logout });
 
 /* ---------- header / dialogs ---------- */
 $('#rulesBtn').addEventListener('click', openRules);
-$('#menuBtn').addEventListener('click', toMenu);
+$('#retireBtn').addEventListener('click', table.askRetire);
 $('#themeToggle').addEventListener('click', () => {
   const r = document.documentElement, cur = r.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'), next = cur === 'dark' ? 'light' : 'dark';
   r.dataset.theme = next; localSet('mp-theme', next);
@@ -65,8 +72,7 @@ async function boot() {
   const u = new URL(location.href);
   try { app.user = await app.net.currentUser() } catch (e) { app.user = null }
   if (!app.user) return renderMenu();
-  await refreshMe();
-  if (app.prof && app.prof.game) enterGame(app.prof.game, { wheel: false });
+  await refreshMe();   // (goes straight to the table when the player is still seated at one)
 }
 boot();
 // installable as an app (home screen). The worker caches nothing (public/sw.js)

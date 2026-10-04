@@ -104,6 +104,13 @@ export function playWheel(info) {
     // a long multiplier (x10,000) must fit a phone: shrink the type, never wrap
     const fit = () => { mult.style.fontSize = ''; const avail = stack.clientWidth - 8, w = mult.offsetWidth; if (w > avail) mult.style.fontSize = (parseFloat(getComputedStyle(mult).fontSize) * avail / w) + 'px' };
     fit();
+    // light sources follow the real layout: rays/vignette on the reel, the glow behind the result
+    const place = () => {
+      const hr = el.getBoundingClientRect(), rr = (reel || stack).getBoundingClientRect(), mr = mult.getBoundingClientRect();
+      el.style.setProperty('--rx', (rr.left + rr.width / 2 - hr.left) + 'px'); el.style.setProperty('--ry', (rr.top + rr.height / 2 - hr.top) + 'px');
+      el.style.setProperty('--gx', (mr.left + mr.width / 2 - hr.left) + 'px'); el.style.setProperty('--gy', (mr.top + mr.height / 2 - hr.top) + 'px');
+    };
+    place();
 
     let phase = 'spin', done = false, counting = false, reelOn = false, raf = 0, rayAnim = null, drone = null, fx = null, holdTimer = 0;
     const timers = [], born = performance.now();
