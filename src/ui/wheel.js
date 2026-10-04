@@ -1,6 +1,7 @@
-// Multiplier reveal on a round prize wheel, printed like a two-colour risograph (pink + blue plates, slightly off-register, on a paper
-// disc). Every multiplier of the stake has one segment; x2 / x3 fill the rest. The wheel stops with the server's multiplier under the
-// pointer (top). The segments are not the odds (those are in the rules). Only the *show* scales with the result, in five steps:
+// Multiplier reveal on a round wheel in the app's own look (glass disc, hairlines, square pegs, the orange pointer). The segments
+// alternate: every multiplier of the stake once (orange), x3 / x2 between them (so x10000 gets 14 segments, x1000 12, x100 10), all
+// labels facing the same way, so the wheel is regular all round. It stops with the server's multiplier under the pointer (top).
+// The segments are not the odds (those are in the rules). Only the *show* scales with the result, in five steps:
 //   t0  x2 x3        crisp ~2.4 s: ratchet wheel, detent bounce, segment flash, small stinger
 //   t1  x4 x5        ~4.1 s: slower "will it stop?" crawl, ring + glow, haptic
 //   t2  x10 x25      ~5.3 s: dim + drone, long creep, flash + shake, sparks, prize rolls up with acceleration
@@ -29,56 +30,39 @@ const AFTER = [1000, 1700, 2100, 2900, 2960];                          // ms fro
 const COUNT = [420, 750, 1000, 1700, 1900], BOOM = [0, 0, 0, 160, 160]; // prize roll-up; the hard-cut pause before the boom
 const FREE_MS = { reveal: 600, count: 500, hold: 1500 };
 
-/* ---------- the wheel (SVG, viewBox -200..200, pointer at the top = -90°) ---------- */
-const NSEG = 16, SEG = 360 / NSEG, PAPER = '#F4F0E8', PINK = '#FF48B0', BLUE = '#0078BF';
-// one segment per multiplier of the stake, spread round the wheel (large and small alternate), x3 / x2 in between
+/* ---------- the wheel (SVG, viewBox -200..200, pointer at the top = -90°; colours come from the theme via CSS classes) ---------- */
+// rare multipliers (x4 and up) on the even segments, largest first clockwise; x3 / x2 alternate on the odd ones
 function wheelSegments(stake) {
-  const rare = (MULTIPLIERS[stake] || []).map(r => r[0]).filter(x => x >= 4), order = [];
-  for (let hi = 0, lo = rare.length - 1; hi <= lo;) { order.push(rare[hi++]); if (hi <= lo) order.push(rare[lo--]) }
-  const segs = new Array(NSEG).fill(0);
-  order.forEach((m, k) => { segs[Math.round(k * NSEG / order.length)] = m });
-  for (let i = 0, c = 0; i < NSEG; i++) if (!segs[i]) segs[i] = c++ % 2 ? 2 : 3;
-  return segs;
+  const rare = (MULTIPLIERS[stake] || []).map(r => r[0]).filter(x => x >= 4);
+  return rare.flatMap((m, i) => [m, i % 2 ? 2 : 3]);
 }
 const at = (r, a) => `${(r * Math.cos(a * Math.PI / 180)).toFixed(2)} ${(r * Math.sin(a * Math.PI / 180)).toFixed(2)}`;
 const wedge = (a0, a1, r0, r1) => `M${at(r0, a0)}L${at(r1, a0)}A${r1} ${r1} 0 0 1 ${at(r1, a1)}L${at(r0, a1)}A${r0} ${r0} 0 0 0 ${at(r0, a0)}Z`;
-const R = 168, RIM = R * .94, HUB = R * .3, OFF = 'translate(2.4 -1.6)';   // OFF: the pink plate's misregistration
-const TILES = (f1, f2) => `<rect x="-31.5" y="-31.5" width="27" height="27" fill="${f1}"/><rect x="4.5" y="4.5" width="27" height="27" fill="${f1}"/><rect x="4.5" y="-31.5" width="27" height="27" fill="${f2}"/><rect x="-31.5" y="4.5" width="27" height="27" fill="${f2}"/>`;
-function wheelDisc(segs) {
-  // ink per segment: P pink, B blue, H pink halftone, K blue halftone, X both (overprint, for x1000 and up)
-  const ink = segs.map((m, i) => m >= 1000 ? 'X' : ['K', 'P', 'H', 'B'][i % 4]);
-  const label = (i, fill) => {
-    const a = -90 + i * SEG, n = ((a % 360) + 360) % 360, rot = n > 90 && n < 270 ? a + 180 : a, [x, y] = at(R * .64, a).split(' '), fs = segs[i] >= 1000 ? 17 : 21;
-    return `<text x="${x}" y="${y}" transform="rotate(${rot} ${x} ${y})" text-anchor="middle" dominant-baseline="central" font-size="${fs}" fill="${fill}"><tspan font-size="${fs * .6}">×</tspan>${fmt(segs[i])}</text>`;
-  };
-  let pink = '', blue = '', knock = '';
+const R = 172, RIM = 160, HUB = 54;
+const ICON = `<g transform="rotate(45) scale(.5)"><rect x="-31.5" y="-31.5" width="27" height="27" class="wd-b"/><rect x="4.5" y="4.5" width="27" height="27" class="wd-b"/><rect x="4.5" y="-31.5" width="27" height="27" class="wd-o"/><rect x="-31.5" y="4.5" width="27" height="27" class="wd-o"/></g>`;
+function wheelDisc(segs, target) {
+  const n = segs.length, seg = 360 / n;
+  let faces = '', lines = '', labels = '', pegs = '';
+  // the flash and the outline of the segment that will stop under the pointer (they turn with it)
+  const t0 = -90 + target * seg - seg / 2, hd = wedge(t0, t0 + seg, HUB, RIM), hit = `<path class="w-win" d="${hd}" opacity="0"/><path class="w-hitl" d="${hd}"/>`;
   segs.forEach((m, i) => {
-    const a = -90 + i * SEG, d = wedge(a - SEG / 2, a + SEG / 2, HUB, RIM), k = ink[i];
-    if (k === 'P' || k === 'X') pink += `<path d="${d}" fill="${PINK}"/>`;
-    if (k === 'B' || k === 'X') blue += `<path d="${d}" fill="${BLUE}"/>`;
-    if (k === 'H') { pink += `<path d="${d}" fill="url(#wdp)"/>`; blue += label(i, BLUE) }
-    if (k === 'K') { blue += `<path d="${d}" fill="url(#wdb)"/>`; pink += label(i, PINK) }
-    if (k === 'P' || k === 'B' || k === 'X') knock += label(i, PAPER);
-    knock += `<path d="M${at(HUB, a - SEG / 2)}L${at(RIM, a - SEG / 2)}" stroke="${PAPER}" stroke-width="1.6"/>`;
-    const [px, py] = at((R + RIM) / 2, a - SEG / 2).split(' '); blue += `<circle cx="${px}" cy="${py}" r="2.6" fill="${BLUE}"/>`;
+    const a = -90 + i * seg, a0 = a - seg / 2;
+    faces += `<path d="${wedge(a0, a0 + seg, HUB, RIM)}" class="${i % 2 ? 'wd-f2' : 'wd-f1'}"/>`;
+    lines += `<path d="M${at(HUB, a0)}L${at(RIM, a0)}"/>`;
+    const [x, y] = at(107, a).split(' '), fs = m >= 1000 ? 19 : 23;
+    labels += `<text x="${x}" y="${y}" transform="rotate(${a} ${x} ${y})" class="${m >= 4 ? 'wd-hi' : 'wd-lo'}" font-size="${fs}"><tspan font-size="${fs * .58}">×</tspan>${fmt(m)}</text>`;
+    const [px, py] = at((R + RIM) / 2, a0).split(' ');
+    pegs += `<rect x="${(+px - 2.6).toFixed(2)}" y="${(+py - 2.6).toFixed(2)}" width="5.2" height="5.2" transform="rotate(${a0 + 45} ${px} ${py})"/>`;
   });
-  blue += `<circle r="${(R + RIM) / 2}" fill="none" stroke="${BLUE}" stroke-width="${R - RIM}"/><circle r="${R + 7}" fill="none" stroke="${BLUE}" stroke-width=".9"/>`;
-  pink += `<circle r="${R + 14}" fill="none" stroke="${PINK}" stroke-width=".9" stroke-dasharray="1.2 4"/>`;
-  knock += `<circle r="${HUB}" fill="${PAPER}"/>`;
-  return `<svg class="w-disc" viewBox="-200 -200 400 400"><defs>
-      <pattern id="wdp" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(15)"><circle cx="2.5" cy="2.5" r="1.45" fill="${PINK}"/></pattern>
-      <pattern id="wdb" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(75)"><circle cx="2.5" cy="2.5" r="1.35" fill="${BLUE}"/></pattern></defs>
-    <circle r="${R + 22}" fill="${PAPER}"/>
-    <g class="pl">${blue}</g><g class="pl" transform="${OFF}">${pink}</g><g>${knock}</g>
-    <g class="pl"><circle r="${HUB - 6}" fill="none" stroke="${BLUE}" stroke-width="1.2"/><circle r="${HUB * .62}" fill="url(#wdp)"/><g transform="rotate(45) scale(.55)">${TILES(BLUE, 'transparent')}</g></g>
-    <g class="pl" transform="${OFF} rotate(45) scale(.55)">${TILES('transparent', PINK)}</g></svg>`;
+  return `<svg class="w-disc" viewBox="-200 -200 400 400">
+    <circle r="${R}" class="wd-base"/>${faces}<g class="wd-ln">${lines}</g>${hit}
+    <circle r="${RIM}" class="wd-ring"/><circle r="${R}" class="wd-ring"/><g class="wd-peg">${pegs}</g>
+    <g class="wd-tx">${labels}</g>
+    <circle r="${HUB}" class="wd-hub"/><circle r="${HUB - 7}" class="wd-ring"/>${ICON}</svg>`;
 }
-// what does not turn: the flash and outline on the segment under the pointer, and the pointer itself
-const wheelFront = () => {
-  const d = wedge(-90 - SEG / 2, -90 + SEG / 2, HUB, RIM), tri = 'M-15 -199L15 -199L0 -157Z';
-  return `<svg class="w-front" viewBox="-200 -200 400 400"><path class="w-win" d="${d}" fill="#fff" opacity="0"/><path class="w-hitl" d="${d}" fill="none" stroke="${PAPER}" stroke-width="3"/>
-    <g class="pl"><path d="${tri}" fill="${BLUE}"/></g><g class="pl" transform="${OFF}"><path d="${tri}" fill="${PINK}"/></g></svg>`;
-};
+// what does not turn: the pointer (a square on a line, like the old mark)
+const wheelFront = () => `<svg class="w-front" viewBox="-200 -200 400 400">
+    <rect class="w-ptr" x="-1.2" y="-188" width="2.4" height="34"/><rect class="w-ptr" x="-8" y="-200" width="16" height="16" transform="rotate(45 0 -192)"/></svg>`;
 
 /* ---------- sparks / embers on a canvas ---------- */
 const WARM = ['#FE7A47', '#FF9F73', '#FFD2B8', '#ffffff'], COOL = ['#7DB4CF', '#5FA3C6', '#BFE3F5', '#ffffff'], ALL = [...WARM, ...COOL];
@@ -128,6 +112,7 @@ export function playWheel(info) {
     const prof = PROFILE[t].map(s => ({ ...s })), S = prof.reduce((s, x) => s + x.ms, 0), D0 = prof.reduce((s, x) => s + x.d, 0);
     const segs = free ? [] : wheelSegments(info.stake);
     if (!free && !segs.includes(m)) segs[0] = m;
+    const SEG = free ? 360 : 360 / segs.length;
     const hits = segs.map((x, i) => x === m ? i : -1).filter(i => i >= 0), TARGET = hits[(Math.random() * hits.length) | 0] || 0;
     // segment i sits at the pointer when the rotation is -i·SEG (mod 360); land a little off its centre, like a real wheel
     const A0 = Math.random() * 360, base = D0 * SEG / CELL, land = -TARGET * SEG + (Math.random() - .5) * SEG * .5;
@@ -138,7 +123,7 @@ export function playWheel(info) {
       <div class="w-bg"></div><div class="w-rays"></div><div class="w-scan"></div><div class="w-vig"></div><div class="w-glow"></div>
       <div class="w-stack">
         <div class="w-top"><div class="eyebrow">${STAKE_LABEL[info.stake] || ''}${buy ? ' · ' + fmt(buy) : ''}</div></div>
-        ${free ? '' : `<div class="w-reel" aria-hidden="true"><div class="w-rot" style="transform:rotate(${A0}deg)">${wheelDisc(segs)}</div>${wheelFront()}<i class="w-ring"></i></div>`}
+        ${free ? '' : `<div class="w-reel" aria-hidden="true"><div class="w-rot" style="transform:rotate(${A0}deg)">${wheelDisc(segs, TARGET)}</div>${wheelFront()}<i class="w-ring"></i></div>`}
         <div class="w-res" role="status"><div class="w-mult" id="wMult">${free ? '<span class="w-free">FREEROLL</span>' : `<small>×</small>${fmt(m)}`}</div>
         <div class="w-prize" id="wPrize"><span id="wPv">0</span><small>CHIPS</small></div></div>
       </div>
