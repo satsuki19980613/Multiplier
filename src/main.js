@@ -1,4 +1,5 @@
 // Multiplier — entry point: boot, screen switching, account. Screens live in src/ui/*.
+import './ui/viewport.js';
 import * as realNet from './net.js';
 import { app, $, toast, closeAllDlg, localSet, REDUCE } from './ui/util.js';
 import { renderMenu, setPane, startQueue, cancelQueue, inQueue } from './ui/menu.js';
