@@ -1,19 +1,30 @@
-# X 投稿（1枚）
+# X 投稿
 
-画像: `promo/out/x-1-multiplier.png`（縦長 3:4、1800×2400）。元は `promo/x-1-multiplier.html`。書き出しは `node promo/render.mjs`、実画面の撮影は `npm run dev` のあと `node promo/capture.mjs`。
-
-## 本文の案
-
-```
-3人で遊ぶ、短期決戦のポーカー。
-開始前に倍率が決まり、1位がチップを総取り。
-
-完全無料・課金なし。チップは購入も換金もできません。
-https://multiplier-poker.pages.dev
-```
+- 告知画像: `promo/out/x-d-wheel.png`（縦長 3:4、1800×2400）。元は `promo/x-d-wheel.html`、書き出しは `node promo/render.mjs`。
+- スクショ（スマホ、1170×2532）: `promo/shots-light/`（ライト）と `promo/shots/`（ダーク）の `1-wheel.png`・`2-table.png`・`3-win.png`。撮影は `npm run dev` のあと `node promo/capture-x.mjs`（ライトは `THEME=light SHOTS=shots-light`）。開発用の仮サーバー（`?fake`）で倍率を ×10,000 に固定して撮っている。
 
 ## Alt テキスト
 
+### 告知画像　x-d-wheel.png
+
 ```
-Multiplier の告知画像。大きく「×10,000」。開始時に決まる倍率の最大値で、参加チップ10が100,000チップになる。見出しは「3人のポーカー。1位が、総取り。」。左下に参加チップ10の倍率の一覧（×10,000・×1,000・×100・×25・×10・×5・×4・×3・×2）。右は実際のプレイ画面で、フロップ Q♥ 7♦ J♥、手札 A♦ 10♣、自分の手番で Check か Bet を選ぶ場面。下端に「プレイマネー・購入なし・換金なし」とURL。
+Multiplier の告知画像。ピンクと青の2色刷りの版画風。右に倍率のルーレット（×2・×3・×4・×5・×10・×25・×100・×1,000・×10,000）があり、左を向いた針が×10,000を指している。左に「PRIZE ×2 — ×10,000」。左下にAとKのカード。下に「PLAYERS 3 / GAME Hold'em / FORMAT Hyper Turbo / PRICE Free」、「プレイマネー・購入なし・換金なし」とURL。
+```
+
+### 1-wheel.png
+
+```
+ゲーム開始時のルーレット画面。倍率が ×10,000 に止まり、1位が受け取るチップは 100,000。
+```
+
+### 2-table.png
+
+```
+3人のテーブルでの自分の手番。フロップが開いていて、相手のbetに対してFold・Call・Raiseを選ぶ場面。上部に倍率 ×10,000 と 100,000 の表示。
+```
+
+### 3-win.png
+
+```
+結果画面。1位（Winner）で +99,990 チップ。順位は YOU が1位、Bot 2人が2位と3位。
 ```

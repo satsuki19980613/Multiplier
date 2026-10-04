@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Multiplier — X / D: risograph wheel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* D — two-colour risograph (fluorescent pink + medium blue on off-white), a prize wheel as the picture.
+   Each ink is its own plate (multiply), the pink plate a little off-register. The wheel is cropped by the right edge;
+   its pointer faces left, at ×10,000, towards the prize line. */
+:root{--paper:#F4F0E8;--pink:#FF48B0;--blue:#0078BF;--ink:#0B3F73;--muted:#5D7590;
+  --f-dis:"Bricolage Grotesque",Arial,sans-serif;--f-mono:"IBM Plex Mono",monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--paper)}
+body{width:900px;height:1200px;overflow:hidden;color:var(--ink);-webkit-font-smoothing:antialiased}
+.page{position:relative;width:900px;height:1200px;padding:46px 54px 40px;display:grid;grid-template-rows:auto auto 1fr auto auto;isolation:isolate}
+.page::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.45;mix-blend-mode:multiply;z-index:9;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .4 0 0 0 0 .38 0 0 0 0 .35 0 0 0 .5 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.mono{font-family:var(--f-mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase}
+.top{display:flex;justify-content:space-between;color:var(--blue);position:relative;z-index:2}
+.top .p{color:var(--pink)}
+.ttl{position:relative;z-index:2;margin-top:20px;font-family:var(--f-dis);font-weight:800;font-size:128px;line-height:.9;letter-spacing:-.045em}
+.ttl span{display:block;color:var(--blue);mix-blend-mode:multiply}
+.ttl span+span{position:absolute;inset:0;color:var(--pink);transform:translate(5px,-3px)}
+#wheel{position:absolute;left:0;top:0;width:900px;height:1200px;z-index:1;pointer-events:none}
+.plate{mix-blend-mode:multiply}
+/* the prize line, left of the pointer */
+.prize{position:absolute;left:54px;top:478px;z-index:2}
+.prize .mono{color:var(--pink);font-size:13px;letter-spacing:.24em}
+.prize .v{margin-top:14px;font-family:var(--f-dis);font-weight:800;line-height:.95;letter-spacing:-.03em;color:var(--blue);mix-blend-mode:multiply}
+.prize .v b{display:block;font-weight:800;font-size:60px}
+.prize .v i{display:block;font-style:normal;font-weight:500;font-size:30px;margin:6px 0 4px;color:var(--pink)}
+.prize .v b small{font-size:.55em;font-weight:700;margin-right:2px;vertical-align:.32em}
+/* two hole cards, bottom left */
+.hand{position:absolute;left:58px;top:760px;width:300px;height:250px;z-index:2}
+.k{position:absolute;width:140px;height:198px;border-radius:10px;mix-blend-mode:multiply;font-family:var(--f-dis);font-weight:800}
+.k b{position:absolute;left:14px;top:8px;font-size:58px;line-height:1;letter-spacing:-.04em;color:var(--paper)}
+.k i{position:absolute;right:12px;bottom:4px;font-style:normal;font-size:88px;line-height:1;color:var(--paper)}
+.k1{left:4px;top:26px;background:var(--pink);transform:rotate(-9deg)}
+.k2{left:150px;top:-4px;background:var(--blue);transform:rotate(5deg)}
+.spec{position:relative;z-index:2;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:2px solid var(--blue);background:var(--paper)}
+.spec div{padding:12px 10px 16px 0;color:var(--blue)}
+.spec .mono{display:block;font-size:10.5px;color:var(--pink)}
+.spec b{display:block;margin-top:6px;font-family:var(--f-dis);font-weight:800;font-size:25px;letter-spacing:-.02em;white-space:nowrap}
+.foot{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:baseline;padding-top:12px;border-top:1px solid rgba(0,120,191,.35);color:var(--muted);background:var(--paper)}
+.foot .url{font-family:var(--f-mono);font-size:15px;letter-spacing:.04em;text-transform:none;color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="page">
+  <svg id="wheel" viewBox="0 0 900 1200" aria-hidden="true"></svg>
+  <div class="top mono"><span>Three-handed poker tournament</span><span class="p">Free · Web</span></div>
+  <div class="ttl" aria-label="Multiplier"><span>Multiplier</span><span aria-hidden="true">Multiplier</span></div>
+  <div></div>
+  <div class="prize"><div class="mono">Prize</div><div class="v"><b><small>×</small>2</b><i>—</i><b><small>×</small>10,000</b></div></div>
+  <div class="hand" aria-hidden="true"><div class="k k1"><b>A</b><i>♠</i></div><div class="k k2"><b>K</b><i>♥</i></div></div>
+  <div class="spec">
+    <div><span class="mono">Players</span><b>3</b></div>
+    <div><span class="mono">Game</span><b>Hold'em</b></div>
+    <div><span class="mono">Format</span><b>Hyper Turbo</b></div>
+    <div><span class="mono">Price</span><b>Free</b></div>
+  </div>
+  <div class="foot"><span class="mono">Play money · No purchase · No cash-out</span><span class="url">multiplier-poker.pages.dev</span></div>
+</div>
+<script>
+// the wheel: 16 segments, ×10,000 at the pointer (left, 180°). Small multipliers repeat, as they are far more common.
+const CX=700,CY=636,R=372,N=16,SEG=360/N,PAPER='#F4F0E8',PINK='#FF48B0',BLUE='#0078BF';
+const M=[10000,2,3,25,2,4,3,100,2,5,3,1000,2,3,10,4];
+// ink per segment: P pink, B blue, H pink halftone, K blue halftone, X both (overprint)
+const INK=M.map((m,i)=>i===0?'X':['K','P','H','B'][i%4]);
+const rad=a=>a*Math.PI/180,pt=(r,a)=>[CX+r*Math.cos(rad(a)),CY+r*Math.sin(rad(a))].map(v=>v.toFixed(2)).join(' ');
+const wedge=(a0,a1,r0,r1)=>`M${pt(r0,a0)} L${pt(r1,a0)} A${r1} ${r1} 0 0 1 ${pt(r1,a1)} L${pt(r0,a1)} A${r0} ${r0} 0 0 0 ${pt(r0,a0)}Z`;
+const HUB=R*.3,RIM=R*.94;
+const seg=i=>{const a=180+i*SEG;return[a-SEG/2,a+SEG/2,a]};
+const fmt=n=>n.toLocaleString('en-US');
+const label=(i,fill)=>{const[, ,a]=seg(i),r=R*.64,up=a%360>90&&a%360<270,rot=up?a+180:a,[x,y]=pt(r,a).split(' ');
+  const big=M[i]>=1000,fs=big?31:38;
+  return`<text x="${x}" y="${y}" transform="rotate(${rot} ${x} ${y})" text-anchor="middle" dominant-baseline="central" font-family="Bricolage Grotesque" font-weight="800" font-size="${fs}" letter-spacing="-1" fill="${fill}"><tspan font-size="${fs*.6}" font-weight="700">×</tspan>${fmt(M[i])}</text>`};
+let pink='',blue='',knock='';
+M.forEach((m,i)=>{const[a0,a1]=seg(i),d=wedge(a0,a1,HUB,RIM),k=INK[i];
+  if(k==='P'||k==='X')pink+=`<path d="${d}" fill="${PINK}"/>`;
+  if(k==='B'||k==='X')blue+=`<path d="${d}" fill="${BLUE}"/>`;
+  if(k==='H')pink+=`<path d="${d}" fill="url(#dp)"/>`;
+  if(k==='K')blue+=`<path d="${d}" fill="url(#db)"/>`;
+  // labels: knocked out of solid ink, printed in the other ink on halftone
+  if(k==='P'||k==='B'||k==='X')knock+=label(i,PAPER);
+  if(k==='H')blue+=label(i,BLUE);
+  if(k==='K')pink+=label(i,PINK);
+});
+// spokes and pegs (paper), the rim (blue), the hub
+for(let i=0;i<N;i++){const a=180+i*SEG-SEG/2;knock+=`<path d="M${pt(HUB,a)} L${pt(RIM,a)}" stroke="${PAPER}" stroke-width="3"/>`;
+  const[px,py]=pt((RIM+R)/2,a).split(' ');blue+=`<circle cx="${px}" cy="${py}" r="5.5" fill="${BLUE}"/>`}
+blue+=`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${BLUE}" stroke-width="${R-RIM}"/>`.replace(`r="${R}"`,`r="${(R+RIM)/2}"`);
+blue+=`<circle cx="${CX}" cy="${CY}" r="${R+12}" fill="none" stroke="${BLUE}" stroke-width="1.5"/>`;
+pink+=`<circle cx="${CX}" cy="${CY}" r="${R+22}" fill="none" stroke="${PINK}" stroke-width="1.5" stroke-dasharray="2 7"/>`;
+knock+=`<circle cx="${CX}" cy="${CY}" r="${HUB}" fill="${PAPER}"/>`;
+const hub=`<circle cx="${CX}" cy="${CY}" r="${HUB-10}" fill="none" stroke="${BLUE}" stroke-width="2"/><circle cx="${CX}" cy="${CY}" r="${HUB*.62}" fill="url(#dp)"/>`;
+const mark=s=>`<g transform="translate(${CX} ${CY}) rotate(45) scale(${s})">`;
+const tiles=(f1,f2)=>`<rect x="-31.5" y="-31.5" width="27" height="27" fill="${f1}"/><rect x="4.5" y="4.5" width="27" height="27" fill="${f1}"/><rect x="4.5" y="-31.5" width="27" height="27" fill="${f2}"/><rect x="-31.5" y="4.5" width="27" height="27" fill="${f2}"/></g>`;
+// the pointer, at 180°, pointing into the wheel
+const PX=CX-R-6,ptr=f=>`<path d="M${PX-40} ${CY-22} L${PX-40} ${CY+22} L${PX+18} ${CY}Z" fill="${f}"/>`;
+document.getElementById('wheel').innerHTML=`<defs>
+  <pattern id="dp" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(15)"><circle cx="4.5" cy="4.5" r="2.7" fill="${PINK}"/></pattern>
+  <pattern id="db" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(75)"><circle cx="4.5" cy="4.5" r="2.5" fill="${BLUE}"/></pattern></defs>
+  <g class="plate">${blue}${ptr(BLUE)}</g>
+  <g class="plate" transform="translate(4 -3)">${pink}${ptr(PINK)}</g>
+  <g>${knock}</g>
+  <g class="plate">${hub}${mark(1.05)}${tiles(BLUE,'transparent')}</g>
+  <g class="plate" transform="translate(4 -3)">${mark(1.05)}${tiles('transparent',PINK)}</g>`;
+</script>
+</body>
+</html>
