@@ -6,7 +6,7 @@
   --glass-hi:rgba(255,255,255,.74); --glass:rgba(255,255,255,.5); --glass-lo:rgba(255,255,255,.3);
   --edge:rgba(255,255,255,.9);
   --well:rgba(255,255,255,.34); --face:#F7F8FA;
-  --wd-face:#FFFFFF; --wd1:#FFFFFF; --wd2:#E2E4E9;
+  --wd-face:#FFFFFF; --wd1:#FFFFFF; --wd2:#E2E4E9; --wd-line:rgba(13,15,19,.16); --wd-ink:#3A3F4A; --wd-muted:#7A808C;
   --shadow:0 28px 60px -30px rgba(22,26,44,.38),0 2px 6px -2px rgba(22,26,44,.08);
   --you:#336B87; --cpu:#FE7A47; --you-soft:rgba(51,107,135,.12); --cpu-soft:rgba(254,122,71,.14); --cpu-ink:#2B1206; --you-text:#336B87;
   --card-ink:#0D0F13; --card-red:#C8243F;
@@ -24,7 +24,7 @@
     --hair:rgba(255,255,255,.08); --hair-2:rgba(255,255,255,.18);
     --glass-hi:rgba(255,255,255,.1); --glass:rgba(255,255,255,.06); --glass-lo:rgba(255,255,255,.03);
     --edge:rgba(255,255,255,.14); --well:rgba(255,255,255,.04); --face:#15171C;
-    --wd-face:#15171C; --wd1:#15171C; --wd2:#1E2127;
+    --wd-face:#15171C; --wd1:#15171C; --wd2:#1E2127; --wd-line:rgba(255,255,255,.18); --wd-ink:#C3C7D0; --wd-muted:#8B919D;
     --shadow:0 28px 60px -26px rgba(0,0,0,.75);
     --you-soft:rgba(51,107,135,.22); --cpu-soft:rgba(254,122,71,.16); --you-text:#7DB4CF;
     --nav-bg:rgba(255,255,255,.08); --nav-ink:#F1F2F5; --seg-on:rgba(255,255,255,.16);
@@ -39,7 +39,7 @@
   --hair:rgba(255,255,255,.08); --hair-2:rgba(255,255,255,.18);
   --glass-hi:rgba(255,255,255,.1); --glass:rgba(255,255,255,.06); --glass-lo:rgba(255,255,255,.03);
   --edge:rgba(255,255,255,.14); --well:rgba(255,255,255,.04); --face:#15171C;
-  --wd-face:#15171C; --wd1:#15171C; --wd2:#1E2127;
+  --wd-face:#15171C; --wd1:#15171C; --wd2:#1E2127; --wd-line:rgba(255,255,255,.18); --wd-ink:#C3C7D0; --wd-muted:#8B919D;
   --shadow:0 28px 60px -26px rgba(0,0,0,.75);
   --you-soft:rgba(51,107,135,.22); --cpu-soft:rgba(254,122,71,.16); --you-text:#7DB4CF;
   --nav-bg:rgba(255,255,255,.08); --nav-ink:#F1F2F5; --seg-on:rgba(255,255,255,.16);
@@ -401,8 +401,7 @@ dialog::backdrop{background:rgba(12,14,20,.28);-webkit-backdrop-filter:blur(8px)
 .w-stack{position:relative;z-index:2;display:grid;justify-items:center;gap:18px;width:100%;max-width:640px}
 /* dark palette for the dimmed tiers (applied under the darkening layer) */
 .wheel.dk{--bg:#0B0C10;--ink:#F1F2F5;--ink-2:#C3C7D0;--muted:#8B919D;--hair:rgba(255,255,255,.08);--hair-2:rgba(255,255,255,.18);
-  --glass-hi:rgba(255,255,255,.1);--glass-lo:rgba(255,255,255,.03);--edge:rgba(255,255,255,.14);--shadow:0 28px 60px -26px rgba(0,0,0,.75);--you-text:#7DB4CF;
-  --wd-face:#15171C;--wd1:#15171C;--wd2:#1E2127}
+  --glass-hi:rgba(255,255,255,.1);--glass-lo:rgba(255,255,255,.03);--edge:rgba(255,255,255,.14);--shadow:0 28px 60px -26px rgba(0,0,0,.75);--you-text:#7DB4CF}
 .wheel.dk.t3,.wheel.dk.t4{--bg:#05060A}
 .w-bg{inset:-40px;opacity:0}
 .w-rays{left:var(--rx,50%);top:var(--ry,50%);width:170vmax;height:170vmax;margin:-85vmax 0 0 -85vmax;opacity:0;will-change:transform;
@@ -420,23 +419,24 @@ dialog::backdrop{background:rgba(12,14,20,.28);-webkit-backdrop-filter:blur(8px)
 .w-fx{inset:0;width:100%;height:100%;z-index:4}
 .w-flash{inset:0;background:#fff;opacity:0;z-index:5}
 .w-top{position:relative;text-align:center}
-/* the round wheel: a glass disc with hairlines and square pegs (theme tokens), turned under a fixed orange pointer at the top */
+/* the round wheel: a disc with hairlines and square pegs, turned under a fixed orange pointer at the top. Its colours (--wd-*) are set per theme on :root only,
+   so the wheel keeps them when the screen darkens for a big multiplier (.wheel.dk) instead of switching mid-spin */
 .w-reel{position:relative;--ws:min(86vw,360px,calc(var(--app-h,100dvh) - 320px));width:var(--ws);height:var(--ws);flex:none}
 .w-rot{position:absolute;inset:0;will-change:transform}
 .w-disc,.w-front{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
-.w-disc{filter:drop-shadow(0 22px 34px rgba(22,26,44,.28))}
+.w-disc{filter:drop-shadow(0 0 0 transparent) drop-shadow(0 22px 34px rgba(22,26,44,.28));transition:filter .8s ease-out}
 .wheel.dk .w-disc{filter:drop-shadow(0 0 34px color-mix(in srgb,var(--cpu) 30%,transparent)) drop-shadow(0 24px 40px rgba(0,0,0,.6))}
-.wd-base{fill:var(--wd-face);stroke:var(--edge);stroke-width:1}
+.wd-base{fill:var(--wd-face);stroke:var(--wd-line);stroke-width:1}
 .wd-f1{fill:var(--wd1)}
 .wd-f2{fill:var(--wd2)}
-.wd-ln path{stroke:var(--hair-2);stroke-width:1}
-.wd-ring{fill:none;stroke:var(--hair-2);stroke-width:1}
-.wd-peg rect{fill:var(--muted)}
+.wd-ln path{stroke:var(--wd-line);stroke-width:1}
+.wd-ring{fill:none;stroke:var(--wd-line);stroke-width:1}
+.wd-peg rect{fill:var(--wd-muted)}
 .wd-tx text{font-family:var(--f-num);letter-spacing:-.04em;text-anchor:middle;dominant-baseline:central}
 .wd-hi{fill:var(--cpu);font-weight:700}
-.wd-lo{fill:var(--ink-2);font-weight:600}
-.wd-lo tspan{fill:var(--muted)}
-.wd-hub{fill:var(--wd-face);stroke:var(--hair-2);stroke-width:1}
+.wd-lo{fill:var(--wd-ink);font-weight:600}
+.wd-lo tspan{fill:var(--wd-muted)}
+.wd-hub{fill:var(--wd-face);stroke:var(--wd-line);stroke-width:1}
 .wd-b{fill:var(--you)}
 .wd-o{fill:var(--cpu)}
 .w-ptr{fill:var(--cpu)}
