@@ -1,0 +1,20 @@
+# Cloudflare Pages response headers. `npm run preview` uses the same values (vite.config.js).
+# style-src 'unsafe-inline': the UI sets per-element CSS variables in markup (deal/flip delays, progress, turn clock). Scripts stay 'self' only.
+# connect-src: this site (/api/auth relay) + production Neon Data API + production Function "game" (TODO: add both URLs once the Neon project exists).
+# If the Neon URLs change, update .env.production too.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/sw.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache

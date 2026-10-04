@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "Multiplier",
+  "short_name": "Multiplier",
+  "lang": "ja",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0D0F13",
+  "theme_color": "#0D0F13",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
