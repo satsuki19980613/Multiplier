@@ -18,8 +18,9 @@ export function setPane(p) { pane = p; renderMenu() }
 export function renderMenu() {
   const el = root(); if (!el) return;
   if (!app.net.online) return paint(el, loginHTML(false));
+  // while the session is still being checked at start-up, show the loader, not the sign-in screen (it would flash on every reopen)
+  if (app.booting || (app.user && !app.prof)) return paint(el, loadingHTML);
   if (!app.user) return paint(el, loginHTML(true), bindLogin);
-  if (!app.prof) return paint(el, `<div class="wordmark">Multiplier</div><div class="acct"><span class="dots" style="margin:14px 0"><i></i><i></i><i></i></span></div>`);
   if (pane === 'queue' && Q) return paint(el, queueHTML());
   if (pane === 'stakes') return paint(el, stakesHTML(), bindStakes);
   paint(el, mainHTML(), bindMain);
@@ -29,6 +30,7 @@ function paint(el, html, bind) {
   el._h = html; el.innerHTML = html; if (bind) bind(el);
 }
 const wordmark = '<div class="wordmark">Multiplier</div>';
+const loadingHTML = `${wordmark}<div class="acct"><span class="dots" style="margin:14px 0"><i></i><i></i><i></i></span></div>`;
 
 function loginHTML(online) {
   const agreed = localGet(AGE_KEY) === '1';

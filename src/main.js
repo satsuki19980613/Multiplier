@@ -67,11 +67,13 @@ document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e =
 /* ---------- boot ---------- */
 async function boot() {
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('fake')) { app.net = await import('./fakeNet.js') }
+  app.booting = app.net.online;   // until the session check below has answered: the loader, not the sign-in screen
   showScreen('menu'); renderMenu();
   if (!app.net.online) return;
   realNet.onSessionLost(() => { cancelQueue(); table.leave(); app.user = null; app.prof = null; showScreen('menu'); renderMenu(); toast('ログインし直してください') });
   const u = new URL(location.href);
   try { app.user = await app.net.currentUser() } catch (e) { app.user = null }
+  app.booting = false;
   if (!app.user) return renderMenu();
   await refreshMe();   // (goes straight to the table when the player is still seated at one)
 }
