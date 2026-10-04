@@ -18,7 +18,7 @@
 <body data-screen="menu">
 <div class="app">
   <header class="top">
-    <div class="brand"><i class="mk" aria-hidden="true">×</i><span>Multiplier</span></div>
+    <div class="brand"><span>Multiplier</span></div>
     <nav class="navpill" aria-label="メニュー">
       <button class="nbtn" id="rulesBtn" type="button" aria-label="Rules">?</button>
       <button class="nbtn ingame" id="menuBtn" type="button">Menu</button>
@@ -30,13 +30,17 @@
 
   <main class="stage" id="stage" aria-label="テーブル">
     <div class="tinfo" id="tInfo"></div>
-    <div class="seat opp" id="seatL"></div>
-    <div class="seat opp" id="seatR"></div>
-    <div class="mid" id="mid">
-      <div class="pot" id="pot"></div>
-      <div class="boardc" id="boardC" aria-label="Community cards"></div>
+    <div class="table" id="table">
+      <div class="felt" aria-hidden="true"></div>
+      <div class="mid" id="mid">
+        <div class="pot" id="pot"></div>
+        <div class="boardc" id="boardC" aria-label="Community cards"></div>
+      </div>
+      <div class="seat opp pos-l" id="seatL"></div>
+      <div class="seat opp pos-r" id="seatR"></div>
+      <div class="seat me pos-m" id="seatM"></div>
+      <div class="betm" id="betM"></div>
     </div>
-    <div class="seat me" id="seatM"></div>
     <div class="dock" id="dock" aria-live="polite"></div>
   </main>
 

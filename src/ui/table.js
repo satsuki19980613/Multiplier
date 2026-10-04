@@ -26,7 +26,7 @@ export function enter(id) {
     revHole: null, sh: { handNo: -1, board: -1, up: [false, false, false], bet: [0, 0, 0], init: false }, loadedAt: Date.now(),
   };
   $('#dock').innerHTML = '<div id="dockMain" style="display:contents"></div>';
-  for (const id of ['#seatL', '#seatR', '#seatM', '#pot', '#boardC', '#tInfo']) { const e = $(id); e.innerHTML = ''; e._h = null }
+  for (const id of ['#seatL', '#seatR', '#seatM', '#pot', '#boardC', '#tInfo', '#betM']) { const e = $(id); e.innerHTML = ''; e._h = null }
   renderLoading();
   document.body.dataset.screen = 'game';
   refit();
@@ -131,7 +131,9 @@ function startReveal(lh, prev) {
   const win = [0, 0, 0];
   for (const p of lh.pots) { const share = Math.floor(p.amount / p.winners.length); p.winners.forEach((s, i) => { win[s] += share + (i < p.amount - share * p.winners.length ? 1 : 0) }) }
   const after = [0, 1, 2].map(s => v.over ? v.seats[s].stack : v.handStart[s]);
-  const pre = after.map((a, s) => Math.max(0, a - win[s]));
+  // stack shown before the payout: what is left after the chips went into the pot. A seat that was all-in would show 0 here,
+  // so a winner shows its hand-start stack instead and counts up to the final stack
+  const pre = after.map((a, s) => { const p = Math.max(0, a - win[s]); return p === 0 && win[s] > 0 ? Math.max(0, a - lh.net[s]) : p });
   const winners = new Set(lh.pots.flatMap(p => p.winners));
   const hole = (prev && prev.holes[t.me]) || null;
   t.rev = { lh, until: Date.now() + dur, stage: 1, showdown, win, after, pre, winners, hole };
@@ -246,6 +248,8 @@ function render() {
   ch = setHTML($('#seatL'), seatHTML(L, M, false)) || ch;
   ch = setHTML($('#seatR'), seatHTML(R, M, false)) || ch;
   ch = setHTML($('#seatM'), seatHTML(me, M, true)) || ch;
+  const mb = M.seats[me].bet;
+  ch = setHTML($('#betM'), `<div class="bchip${mb ? '' : ' none'}"><i></i><b>${fmt(mb)}</b></div>`) || ch;
   ch = setHTML($('#pot'), `<span>POT</span><b>${fmt(M.pot)}</b>`) || ch; $('#pot').classList.toggle('zero', !M.pot);
   ch = setHTML($('#boardC'), Array.from({ length: 5 }, (_, i) => M.board[i] != null ? cardHTML(M.board[i]) : '<div class="slot"></div>').join('')) || ch;
   ch = renderDock(M) || ch;
@@ -285,33 +289,27 @@ function seatHTML(s, M, isMe) {
   const pl = acting ? null : plateOn(s);
   const cls = ['sp', isMe ? 'me-s' : 'opp-s', acting ? 'act' : '', S.folded ? 'fold' : '', S.out ? 'out' : '', S.win ? 'win' : ''].filter(Boolean).join(' ');
   const bb = v.bb || 1;
-  // cards
+  // hole cards float above the plate (the plate alone fixes the seat position, so the seat never moves when cards come and go)
   let cards = '';
   if (S.cards === 'back') cards = cardHTML(null) + cardHTML(null);
   else if (Array.isArray(S.cards)) cards = S.cards.map(c => cardHTML(c, { dim: S.folded && isMe })).join('');
-  // bet row (chip + amount, action plate)
-  let betRow = '';
-  if (S.bet > 0) betRow += `<i></i><b>${fmt(S.bet)}</b>`;
-  if (pl && !rv) betRow += `<span class="pl k-${pl.k}">${PL[pl.k]}</span>`;
-  // note row
+  // note row: result > last action > status
   let note = '';
   const lh = v.lastHand;
   if (rv && rv.stage >= 2 && S.win) note = `<span class="w up">+${fmt(Math.max(0, lh.net[s]))}</span>${lh.names[s] ? `<span class="hn">${esc(lh.names[s])}</span>` : ''}`;
   else if (rv && rv.stage >= 2 && lh.names[s] && !S.folded) note = `<span class="hn">${esc(lh.names[s])}</span>`;
   else if (S.out) note = S.place ? ordinal(S.place).toUpperCase() : 'OUT';
-  else if (S.folded && !pl) note = 'FOLD';
+  else if (pl && !rv) note = `<span class="pl k-${pl.k}">${PL[pl.k]}</span>`;
+  else if (S.folded) note = 'FOLD';
   else if (S.allIn) note = '<span class="ai">ALL-IN</span>';
   else if (S.away) note = 'AWAY';
   else if (acting && isBot(s)) note = '<span class="dots" style="margin:0"><i></i><i></i><i></i></span>';
   const name = isMe ? 'YOU' : esc(v.names[s]);
   const dbtn = v.button === s && !S.out ? '<b class="dbtn" title="Dealer">D</b>' : '';
-  const stackEl = `<div class="stk"><b data-stk="${s}">${fmt(S.stack)}</b><small>${Math.round(S.stack / bb)} BB</small></div>`;
   const clk = acting && !isBot(s) ? clockBarHTML(s) : '';
-  if (isMe) return `<div class="${cls}"><div class="sp-hd"><i class="gem"></i><span class="nm">${name}</span>${dbtn}</div>
-    <div class="sp-body">${stackEl}<div class="hole">${cards}</div><div class="sp-ft" style="justify-items:end"><div class="bet" style="justify-content:flex-end">${betRow}</div><div class="note" style="justify-content:flex-end">${note}</div></div></div>${clk}</div>`;
-  return `<div class="${cls}"><div class="sp-hd"><i class="gem"></i><span class="nm">${name}</span>${dbtn}</div>
-    <div class="sp-body"><div class="hole">${cards}</div>${stackEl}</div>
-    <div class="sp-ft"><div class="bet">${betRow}</div><div class="note">${note}</div></div>${clk}</div>`;
+  const bet = !isMe && S.bet > 0 ? `<div class="bchip"><i></i><b>${fmt(S.bet)}</b></div>` : '';
+  return `<div class="hole">${cards}</div><div class="${cls}"><div class="sp-hd"><i class="gem"></i><span class="nm">${name}</span></div>
+    <div class="stk"><b data-stk="${s}">${fmt(S.stack)}</b><small>${Math.round(S.stack / bb)} BB</small></div><div class="note">${note}</div>${clk}</div>${dbtn}${bet}`;
 }
 
 /* ---------- animations after a render ---------- */
@@ -325,7 +323,7 @@ function afterRender(M) {
   else if (sh.init && M.board.length > sh.board) cards.forEach((c, i) => flip(c, i * 110));
   sh.board = M.board.length;
   // opponents' cards turned face up at showdown
-  M.seats.forEach(S => { if (S.s !== me && S.up && !sh.up[S.s]) document.querySelectorAll(`[data-stk="${S.s}"]`).forEach(el => { const hc = el.closest('.sp').querySelectorAll('.hole .card'); hc.forEach((c, i) => flip(c, 250 + i * 130)) }) });
+  M.seats.forEach(S => { if (S.s !== me && S.up && !sh.up[S.s]) document.querySelectorAll(`[data-stk="${S.s}"]`).forEach(el => { const hc = el.closest('.seat').querySelectorAll('.hole .card'); hc.forEach((c, i) => flip(c, 250 + i * 130)) }) });
   sh.up = M.seats.map(S => S.up);
   // new hand: deal
   if (!t.rev && sh.handNo !== v.handNo) {
@@ -333,7 +331,11 @@ function afterRender(M) {
     sh.handNo = v.handNo;
   }
   // bets placed
-  M.seats.forEach(S => { if (sh.init && S.bet > sh.bet[S.s]) { const el = document.querySelector(`[data-stk="${S.s}"]`); const b = el && el.closest('.sp').querySelector('.bet i, .bet b'); const ch = el && el.closest('.sp').querySelector('.bet'); ch && ch.animate([{ transform: 'translateY(-8px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 300, easing: EASE }) } });
+  M.seats.forEach(S => {
+    if (!(sh.init && S.bet > sh.bet[S.s])) return;
+    const el = S.s === me ? $('#betM .bchip') : document.querySelector(`[data-stk="${S.s}"]`)?.closest('.seat').querySelector('.bchip');
+    if (el) el.animate([{ transform: 'translateY(-8px) scale(.9)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 320, easing: EASE });
+  });
   sh.bet = M.seats.map(S => S.bet);
   sh.init = true;
 }
@@ -472,11 +474,21 @@ function openSheet() {
 function closeSheet() { if (T) T.rs = null; const h = $('#rsheet'); if (h) h.remove() }
 
 /* ===================== layout: the largest card size at which everything fits ===================== */
+const rectOf = e => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null };
+const hit = (a, b, m = 3) => a.l < b.r + m && b.l < a.r + m && a.t < b.b + m && b.t < a.b + m;
+// everything must fit without overflow, and the table's parts (each seat's hole cards and plate, the pot and board, the hero's bet) must stay inside the table and not overlap
 function fits() {
-  const st = $('#stage');
-  if (st.scrollHeight > st.clientHeight + 1 || st.scrollWidth > st.clientWidth + 1) return false;
-  if ($('#boardC').offsetWidth > $('#mid').clientWidth + 1) return false;
-  for (const id of ['#seatL', '#seatR', '#seatM']) { const e = $(id).firstElementChild; if (e && (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1)) return false }
+  const st = $('#stage'), tb = $('#table');
+  // (no stage scrollWidth check: flipping cards are transformed and would widen it for a moment)
+  if (st.scrollHeight > st.clientHeight + 1 || $('#tInfo').scrollWidth > $('#tInfo').clientWidth + 1) return false;
+  const T0 = tb.getBoundingClientRect();
+  const seat = id => [...$(id).children].filter(e => !e.classList.contains('bchip') && !e.classList.contains('dbtn')).map(rectOf).filter(Boolean);
+  const G = [seat('#seatL'), seat('#seatR'), seat('#seatM'), [rectOf($('#pot')), rectOf($('#boardC'))].filter(Boolean), [rectOf($('#betM .bchip'))].filter(Boolean)];
+  const all = G.flat();
+  for (const g of all) if (g.l < T0.left - 1 || g.r > T0.right + 1 || g.t < T0.top - 1 || g.b > T0.bottom + 1) return false;
+  const B = G[3].length ? { l: Math.min(...G[3].map(r => r.l)), r: Math.max(...G[3].map(r => r.r)) } : null;
+  if (B && B.r - B.l > (T0.right - T0.left) * .8) return false;
+  for (let i = 0; i < G.length; i++) for (let j = i + 1; j < G.length; j++) for (const a of G[i]) for (const b of G[j]) if (hit(a, b)) return false;
   return true;
 }
 function largest(lo, hi, set) {
@@ -492,7 +504,7 @@ export function fitTable(force) {
   if (!force && key === fitKey) return; fitKey = key;
   b.classList.add('measuring');
   b.classList.toggle('land', vw > vh * 1.25 && vh < 600);
-  const c = largest(18, b.classList.contains('land') ? 56 : 80, x => st.style.setProperty('--cw', x + 'px'));
+  const c = largest(16, b.classList.contains('land') ? 52 : 84, x => st.style.setProperty('--cw', x + 'px'));
   st.style.setProperty('--cw', c + 'px');
   b.classList.remove('measuring');
 }

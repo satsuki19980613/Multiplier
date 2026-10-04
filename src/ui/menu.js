@@ -19,7 +19,7 @@ export function renderMenu() {
   const el = root(); if (!el) return;
   if (!app.net.online) return paint(el, loginHTML(false));
   if (!app.user) return paint(el, loginHTML(true), bindLogin);
-  if (!app.prof) return paint(el, `<div class="wordmark"><i>×</i>Multiplier</div><div class="acct"><span class="dots" style="margin:14px 0"><i></i><i></i><i></i></span></div>`);
+  if (!app.prof) return paint(el, `<div class="wordmark">Multiplier</div><div class="acct"><span class="dots" style="margin:14px 0"><i></i><i></i><i></i></span></div>`);
   if (pane === 'queue' && Q) return paint(el, queueHTML());
   if (pane === 'stakes') return paint(el, stakesHTML(), bindStakes);
   paint(el, mainHTML(), bindMain);
@@ -28,7 +28,7 @@ function paint(el, html, bind) {
   if (el._h === html) return;
   el._h = html; el.innerHTML = html; if (bind) bind(el);
 }
-const wordmark = '<div class="wordmark"><i>×</i>Multiplier</div>';
+const wordmark = '<div class="wordmark">Multiplier</div>';
 
 function loginHTML(online) {
   const agreed = localGet(AGE_KEY) === '1';
