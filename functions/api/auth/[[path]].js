@@ -5,7 +5,7 @@ import{proxyAuth}from'../../../src/authProxy.js';
  * Production Neon Auth URL (same as VITE_NEON_AUTH_URL in .env.production; a public address).
  * If it changes, update .env.production and public/_headers too.
  */
-export const UPSTREAM=''; // TODO: production Neon Auth URL (after the Neon project is created)
+export const UPSTREAM='https://ep-wild-term-b3paj7ze.neonauth.c-4.ap-southeast-1.aws.neon.tech/neondb/auth';
 
 export const onRequest=ctx=>{
   const p=ctx.params.path;

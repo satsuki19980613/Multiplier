@@ -2,7 +2,7 @@
 import{spawn}from'node:child_process';
 import{resolve}from'node:path';
 
-export const PROJECT=process.env.NEON_PROJECT_ID??'';
+export const PROJECT=process.env.NEON_PROJECT_ID??'summer-hat-89673886';
 export const ROOT=resolve(import.meta.dirname,'..');
 const NEONCTL=resolve(ROOT,'node_modules/neonctl/bin/cli.js');
 

@@ -41,7 +41,16 @@
 | マイグレーション | `npm run db:migrate -- --branch dev`（Neon プロジェクトの作成後。本番は**さつきの確認後**） |
 | Function の配備 | `npm run deploy:game -- --branch dev`（同上） |
 
-Neon プロジェクトは未作成（`scripts/neon.mjs` の `NEON_PROJECT_ID`、`functions/api/auth/[[path]].js` の `UPSTREAM`、`public/_headers` の connect-src、`.env.*` が TODO）。
+### インフラ（2026-10-04 作成）
+| 区分 | 内容 |
+|---|---|
+| Neon | プロジェクト `multiplier`（`summer-hat-89673886`、シンガポール、Postgres 18）。ブランチ `production`（本番）・`dev`（開発） |
+| ログイン | Neon Auth（Google。**Neon の共有キー**＝同意画面に Neon の表示が出る。本番公開前に自前の Google OAuth クライアントへ切り替えを検討）。信頼ドメイン: production は https://multiplier-poker.pages.dev、dev は localhost を許可 |
+| Data API | 両ブランチで有効（neon_auth、既定の権限付与なし）。マイグレーション後は `neonctl data-api refresh-schema` |
+| Function `game` | production: https://br-autumn-bar-b33acvo1-game.compute.c-4.ap-southeast-1.aws.neon.tech/ ・ dev: https://br-shy-boat-b3fs4jmg-game.compute.c-4.ap-southeast-1.aws.neon.tech/ |
+| ホスティング | Cloudflare Pages `multiplier-poker`（https://multiplier-poker.pages.dev。`multiplier.pages.dev` は他者が使用中）。GitHub 連携でビルド `npm run build`・出力 `dist` |
+
+URL を変えたら `.env.*`・`functions/api/auth/[[path]].js` の `UPSTREAM`・`public/_headers` の connect-src・`scripts/deploy-game.mjs` の許可 Origin を合わせる。
 
 ## 5. 規約
 

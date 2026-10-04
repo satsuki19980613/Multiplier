@@ -139,8 +139,8 @@ try{
   const g2r=(await pool.query('select players from public.games where id=$1',[g2])).rows[0];
   ok(g2r.players.filter(Boolean).length===2&&g2r.players.includes(U[0])&&g2r.players.includes(U[1]),'two humans + one bot (null seat)');
   const v2=(await rpc(U[0],'select public.game_poll($1,-1)',[g2])).view;
-  const bn=v2.names.filter(n=>n.startsWith('🤖'));
-  ok(bn.length===1&&v2.meta.bot.filter(Boolean).length===1,'bot has a 🤖 name '+bn);
+  const bn=v2.names.filter((n,i)=>v2.meta.bot[i]);
+  ok(bn.length===1&&v2.meta.bot.filter(Boolean).length===1,'one bot seat (flagged in meta.bot) '+bn);
   ok((await db.queue(U[1],'low')).game===g2,'the other waiter is taken to the table too');
   await playOut(g2,[U[0],U[1]],'2 humans + bot');
   await closeGames();
@@ -150,7 +150,7 @@ try{
   await agedQueue();
   const g3=(await db.queue(U[2],'low')).game;ok(!!g3,'a lone player gets two bots');
   const v3=(await rpc(U[2],'select public.game_poll($1,-1)',[g3])).view;
-  const bn3=v3.names.filter(n=>n.startsWith('🤖'));
+  const bn3=v3.names.filter((n,i)=>v3.meta.bot[i]);
   ok(bn3.length===2&&bn3[0]!==bn3[1],'two different bot names '+bn3);
   const c3=await chipsOf(U[2]);
   const views3=await playOut(g3,[U[2]],'1 human + 2 bots (human time-outs and bots, driven by tick)');
