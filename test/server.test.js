@@ -7,7 +7,7 @@ import{viewFor}from'../src/view.js';
 import{STAKES,FREEROLL,MULTIPLIERS,MULT_TOTAL,structureFor}from'../src/spin.js';
 import{botMove}from'../src/bot.js';
 import{
-  MoveError,TURN_MS,TIMEBANK_MS,GRACE_MS,REVEAL_MS,WHEEL_MS,BOT_THINK_MS,SITOUT_MS,MAX_STRIKES,
+  MoveError,TURN_MS,TIMEBANK_MS,GRACE_MS,REVEAL_MS,WHEEL_MS,WHEEL_BIG_MS,wheelMsFor,BOT_THINK_MS,SITOUT_MS,MAX_STRIKES,
   BOT_NAMES,botNames,checkEntry,createTable,applyRequest,tick,viewsOf,settle,commit,publicMeta,humanAlive,finishBotsOnly,
 }from'../server/game/rules.js';
 import{createHandler}from'../server/game/handler.js';
@@ -395,4 +395,13 @@ test('HTTP: every MoveError code has a status; unknown codes are 422',async()=>{
   for(const c of['not_found','gone','stale','not_yet','game_over','not_your_turn','busy','no_profile','insufficient_chips','freeroll_unavailable','locked_stake','illegal'])
     assert.ok(Number.isInteger(STATUS[c]),c);
   assert.equal(STATUS.not_found,404);assert.equal(STATUS.no_profile,403);
+});
+
+test('wheel budget: the first turn clock waits longer for the ×100+ reveal',()=>{
+  assert.equal(wheelMsFor(null),WHEEL_MS);assert.equal(wheelMsFor(25),WHEEL_MS);
+  assert.equal(wheelMsFor(100),WHEEL_BIG_MS);assert.equal(wheelMsFor(10000),WHEEL_BIG_MS);
+  for(const m of[2,100]){
+    const t=createTable({players:[human(0),human(1),human(2)],stake:'low',now:T0,rnd:rndFor(3),forceMultiplier:m});
+    assert.equal(t.meta.clock.turnStart,T0+wheelMsFor(m),`${m}x`);
+  }
 });

@@ -10,7 +10,9 @@ import{newGame,actor,applyAction,autoAction,EngineError}from'../../src/engine.js
 import{viewFor}from'../../src/view.js';
 import{STAKES,FREEROLL,drawMultiplier,structureFor}from'../../src/spin.js';
 
-export const TURN_MS=15000,TIMEBANK_MS=30000,GRACE_MS=1500,REVEAL_MS=3500,WHEEL_MS=6000;
+export const TURN_MS=15000,TIMEBANK_MS=30000,GRACE_MS=1500,REVEAL_MS=3500,WHEEL_MS=6000,WHEEL_BIG_MS=9500;
+/** time the client's multiplier wheel may take before the first turn clock starts (×100 and above run a ~8 s show) */
+export const wheelMsFor=multiplier=>multiplier!=null&&multiplier>=100?WHEEL_BIG_MS:WHEEL_MS;
 export const BOT_WAIT_MS=15000,QUEUE_FRESH_MS=6000,SITOUT_MS=1500,MAX_STRIKES=2;
 export const BOT_THINK_MS=[900,2600];
 export const STAKE_KEYS=['low','mid','high','free'];
@@ -78,7 +80,7 @@ export function createTable({players,stake,now,rnd,forceMultiplier=null}){
     clock:{turnStart:now,deadline:null,timebank:[TIMEBANK_MS,TIMEBANK_MS,TIMEBANK_MS],strikes:[0,0,0],botAt:null},
     result:null,
   };
-  meta.clock=clockAt(state,meta,meta.clock,now+WHEEL_MS);
+  meta.clock=clockAt(state,meta,meta.clock,now+wheelMsFor(multiplier));
   return{state,meta};
 }
 
