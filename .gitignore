@@ -10,3 +10,4 @@ dist/
 Thumbs.db
 .claude/settings.local.json
 *.whl
+promo/shots/frames/

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Multiplier — X (portrait 3:4, dark)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=Zen+Kaku+Gothic+New:wght@500;700&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* One X image (900×1200, rendered at 2×). Same frame as grid-holdem/promo (bar · head · body · spec strip), dark like the app.
+   One focal point: the top multiplier. The rest is real: the app's own multiplier list (src/spin.js) and a real screenshot. */
+:root{--bg:#0B0C0F;--panel:#121419;--ink:#F1F2F5;--ink-2:#C3C7D0;--muted:#8B919D;--hair:rgba(255,255,255,.08);--hair-2:rgba(255,255,255,.16);
+  --you:#336B87;--you-t:#7DB4CF;--opp:#FE7A47;
+  --f-num:"Inter Tight","Inter",Arial,sans-serif;--f-ui:"Zen Kaku Gothic New","Hiragino Kaku Gothic ProN",sans-serif;--f-mono:"Courier Prime","Courier New",monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{width:900px;height:1200px;overflow:hidden;color:var(--ink);font-family:var(--f-ui);-webkit-font-smoothing:antialiased;word-break:auto-phrase;line-break:strict}
+.page{position:relative;width:900px;height:1200px;padding:40px 48px 0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto 1fr auto}
+.mono{font-family:var(--f-mono);font-size:14px;letter-spacing:.24em;text-transform:uppercase}
+
+.bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
+.logo{display:flex;align-items:center;gap:12px;font-family:var(--f-num);font-weight:700;font-size:20px;letter-spacing:.32em}
+.logo svg{width:22px;height:22px;flex:none}
+.logo i{font-style:normal;color:var(--opp);letter-spacing:0;margin-left:.06em}
+.bar .mid{color:var(--opp)}
+.bar .end{justify-self:end;color:var(--muted)}
+
+/* the number */
+.head{padding-top:64px}
+.kick{display:flex;gap:18px;align-items:baseline;font-family:var(--f-mono);font-size:16px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
+.kick b{color:var(--ink);font-weight:700}
+.big{margin:14px 0 0 -10px;font-family:var(--f-num);font-weight:800;font-size:217px;line-height:.86;letter-spacing:-.045em;color:var(--opp);white-space:nowrap;font-variant-numeric:tabular-nums}
+.big small{font-size:.5em;font-weight:500;letter-spacing:0;margin-right:.04em;vertical-align:.32em}
+.rule{margin-top:34px;height:1px;background:var(--hair-2)}
+
+/* two columns: the outcome + the list on the left, the real table on the right */
+.body{display:grid;grid-template-columns:minmax(0,1fr) 316px;column-gap:44px;padding:34px 0 40px;min-height:0;align-items:stretch}
+.body>.col{display:flex;flex-direction:column}
+.eq{display:flex;align-items:baseline;gap:16px;font-family:var(--f-num);font-weight:700;font-size:54px;line-height:1;letter-spacing:-.02em;white-space:nowrap}
+.eq .op{font-weight:400;color:var(--muted)}
+.eq small{font-family:var(--f-mono);font-weight:700;font-size:15px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase}
+.lead{margin-top:34px;font-size:42px;font-weight:700;line-height:1.45;letter-spacing:.04em}
+.lead span{display:block}
+
+.ladder{margin-top:auto}
+.ladder .cap{color:var(--muted);font-size:13px;letter-spacing:.2em;padding-bottom:12px;border-bottom:1px solid var(--hair-2)}
+.ladder ol{list-style:none;display:grid;grid-template-columns:repeat(3,auto);justify-content:start;column-gap:44px}
+.ladder li{padding:12px 0;border-bottom:1px solid var(--hair);font-family:var(--f-num);font-weight:600;font-size:30px;letter-spacing:-.01em;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.ladder li small{font-size:.62em;font-weight:500;color:var(--muted);margin-right:2px}
+.ladder li.top{color:var(--opp)}
+.ladder li.top small{color:var(--opp)}
+
+.ph{align-self:end;width:316px;border:1px solid var(--hair-2);padding:6px;background:var(--panel);box-shadow:0 40px 70px -36px rgba(0,0,0,.9)}
+.ph img{display:block;width:100%;height:auto}
+
+.spec{display:flex;align-items:center;justify-content:space-between;margin:0 -48px;padding:18px 48px;border-top:1px solid var(--hair);background:var(--panel);position:relative;z-index:2}
+.spec .l{font-family:var(--f-mono);font-size:14px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
+.spec .url{font-family:var(--f-mono);font-size:16px;letter-spacing:.12em;color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="bar">
+    <div class="logo"><svg viewBox="0 0 100 100" aria-hidden="true"><g transform="translate(50 50) rotate(45)"><rect x="-31.5" y="-31.5" width="27" height="27" fill="#336B87"/><rect x="4.5" y="4.5" width="27" height="27" fill="#336B87"/><rect x="4.5" y="-31.5" width="27" height="27" fill="#FE7A47"/><rect x="-31.5" y="4.5" width="27" height="27" fill="#FE7A47"/></g></svg><span>MULTIPLIE<span style="letter-spacing:0">R</span><i>.</i></span></div>
+    <div class="mono mid">3-Max · Hyper Turbo</div>
+    <div class="mono end">Free · Web</div>
+  </div>
+
+  <div class="head">
+    <div class="kick"><span>Drawn at the start</span><span>—</span><b>Up to</b></div>
+    <div class="big"><small>×</small>10,000</div>
+    <div class="rule"></div>
+  </div>
+
+  <div class="body">
+    <div class="col">
+      <div class="eq"><span>10</span><span class="op">→</span><span>100,000</span><small>Chips</small></div>
+      <p class="lead"><span>3人のポーカー。</span><span>1位が、総取り。</span></p>
+      <div class="ladder">
+        <div class="mono cap">Buy-in 10 · every multiplier</div>
+        <ol id="ladder"></ol>
+      </div>
+    </div>
+    <div class="ph"><img src="shots/table.png" alt=""></div>
+  </div>
+
+  <div class="spec"><div class="l">Play money · No purchase · No cash-out</div><div class="url">multiplier-poker.pages.dev</div></div>
+</div>
+<script>
+// the real list for buy-in 10 (src/spin.js MULTIPLIERS.low), largest first, read down the columns
+const M=[10000,1000,100,25,10,5,4,3,2],f=n=>n.toLocaleString('en-US');
+document.getElementById('ladder').style.gridTemplateRows='repeat(3,auto)';
+document.getElementById('ladder').style.gridAutoFlow='column';
+document.getElementById('ladder').innerHTML=M.map((m,i)=>`<li class="${i?'':'top'}"><small>×</small>${f(m)}</li>`).join('');
+</script>
+</body>
+</html>
