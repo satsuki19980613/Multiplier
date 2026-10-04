@@ -39,7 +39,7 @@ body{width:900px;height:1200px;overflow:hidden;color:var(--ink);-webkit-font-smo
 .k b{position:absolute;left:14px;top:8px;font-size:58px;line-height:1;letter-spacing:-.04em;color:var(--paper)}
 .k i{position:absolute;right:12px;bottom:4px;font-style:normal;font-size:88px;line-height:1;color:var(--paper)}
 .k1{left:4px;top:26px;background:var(--pink);transform:rotate(-9deg)}
-.k2{left:150px;top:-4px;background:var(--blue);transform:rotate(5deg)}
+.k2{left:136px;top:-4px;background:var(--blue);transform:rotate(5deg)}
 .spec{position:relative;z-index:2;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:2px solid var(--blue);background:var(--paper)}
 .spec div{padding:12px 10px 16px 0;color:var(--blue)}
 .spec .mono{display:block;font-size:10.5px;color:var(--pink)}
@@ -65,50 +65,38 @@ body{width:900px;height:1200px;overflow:hidden;color:var(--ink);-webkit-font-smo
   <div class="foot"><span class="mono">Play money · No purchase · No cash-out</span><span class="url">multiplier-poker.pages.dev</span></div>
 </div>
 <script>
-// the wheel: 16 segments, ×10,000 at the pointer (left, 180°). Small multipliers repeat, as they are far more common.
-const CX=700,CY=636,R=372,N=16,SEG=360/N,PAPER='#F4F0E8',PINK='#FF48B0',BLUE='#0078BF';
-const M=[10000,2,3,25,2,4,3,100,2,5,3,1000,2,3,10,4];
-// ink per segment: P pink, B blue, H pink halftone, K blue halftone, X both (overprint)
-const INK=M.map((m,i)=>i===0?'X':['K','P','H','B'][i%4]);
+// the wheel: the same 14 segments as the app's wheel for buy-in 10 (src/ui/wheel.js): every multiplier once, x3 / x2 between them,
+// all labels reading from the rim towards the centre. x10,000 sits at the pointer (left, 180°). No misregistration on the wheel.
+const CX=700,CY=636,R=372,PAPER='#F4F0E8',PINK='#FF48B0',BLUE='#0078BF';
+const M=[10000,1000,100,25,10,5,4].flatMap((m,i)=>[m,i%2?2:3]),N=M.length,SEG=360/N;
+// ink: x10,000 both inks (overprint), the other multipliers solid blue / pink in turn, x3 / x2 pink halftone
+const INK=M.map((m,i)=>i===0?'X':i%2?'H':(i/2)%2?'B':'P');
 const rad=a=>a*Math.PI/180,pt=(r,a)=>[CX+r*Math.cos(rad(a)),CY+r*Math.sin(rad(a))].map(v=>v.toFixed(2)).join(' ');
 const wedge=(a0,a1,r0,r1)=>`M${pt(r0,a0)} L${pt(r1,a0)} A${r1} ${r1} 0 0 1 ${pt(r1,a1)} L${pt(r0,a1)} A${r0} ${r0} 0 0 0 ${pt(r0,a0)}Z`;
 const HUB=R*.3,RIM=R*.94;
 const seg=i=>{const a=180+i*SEG;return[a-SEG/2,a+SEG/2,a]};
 const fmt=n=>n.toLocaleString('en-US');
-const label=(i,fill)=>{const[, ,a]=seg(i),r=R*.64,up=a%360>90&&a%360<270,rot=up?a+180:a,[x,y]=pt(r,a).split(' ');
-  const big=M[i]>=1000,fs=big?31:38;
-  return`<text x="${x}" y="${y}" transform="rotate(${rot} ${x} ${y})" text-anchor="middle" dominant-baseline="central" font-family="Bricolage Grotesque" font-weight="800" font-size="${fs}" letter-spacing="-1" fill="${fill}"><tspan font-size="${fs*.6}" font-weight="700">×</tspan>${fmt(M[i])}</text>`};
+const label=(i,fill)=>{const[, ,a]=seg(i),[x,y]=pt(R*.63,a).split(' '),fs=M[i]>=1000?34:42;
+  return`<text x="${x}" y="${y}" transform="rotate(${a+180} ${x} ${y})" text-anchor="middle" dominant-baseline="central" font-family="Bricolage Grotesque" font-weight="800" font-size="${fs}" letter-spacing="-1" fill="${fill}"><tspan font-size="${fs*.6}" font-weight="700">×</tspan>${fmt(M[i])}</text>`};
 let pink='',blue='',knock='';
 M.forEach((m,i)=>{const[a0,a1]=seg(i),d=wedge(a0,a1,HUB,RIM),k=INK[i];
   if(k==='P'||k==='X')pink+=`<path d="${d}" fill="${PINK}"/>`;
   if(k==='B'||k==='X')blue+=`<path d="${d}" fill="${BLUE}"/>`;
-  if(k==='H')pink+=`<path d="${d}" fill="url(#dp)"/>`;
-  if(k==='K')blue+=`<path d="${d}" fill="url(#db)"/>`;
-  // labels: knocked out of solid ink, printed in the other ink on halftone
-  if(k==='P'||k==='B'||k==='X')knock+=label(i,PAPER);
-  if(k==='H')blue+=label(i,BLUE);
-  if(k==='K')pink+=label(i,PINK);
+  if(k==='H'){pink+=`<path d="${d}" fill="url(#dp)"/>`;blue+=label(i,BLUE)}
+  else knock+=label(i,PAPER);   // knocked out of the solid ink
 });
-// spokes and pegs (paper), the rim (blue), the hub
+// spokes (paper), pegs and rim (blue), the hub with the mark (blue top and bottom, pink left and right, like the icon)
 for(let i=0;i<N;i++){const a=180+i*SEG-SEG/2;knock+=`<path d="M${pt(HUB,a)} L${pt(RIM,a)}" stroke="${PAPER}" stroke-width="3"/>`;
   const[px,py]=pt((RIM+R)/2,a).split(' ');blue+=`<circle cx="${px}" cy="${py}" r="5.5" fill="${BLUE}"/>`}
-blue+=`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${BLUE}" stroke-width="${R-RIM}"/>`.replace(`r="${R}"`,`r="${(R+RIM)/2}"`);
-blue+=`<circle cx="${CX}" cy="${CY}" r="${R+12}" fill="none" stroke="${BLUE}" stroke-width="1.5"/>`;
+blue+=`<circle cx="${CX}" cy="${CY}" r="${(R+RIM)/2}" fill="none" stroke="${BLUE}" stroke-width="${R-RIM}"/><circle cx="${CX}" cy="${CY}" r="${R+12}" fill="none" stroke="${BLUE}" stroke-width="1.5"/>`;
 pink+=`<circle cx="${CX}" cy="${CY}" r="${R+22}" fill="none" stroke="${PINK}" stroke-width="1.5" stroke-dasharray="2 7"/>`;
-knock+=`<circle cx="${CX}" cy="${CY}" r="${HUB}" fill="${PAPER}"/>`;
-const hub=`<circle cx="${CX}" cy="${CY}" r="${HUB-10}" fill="none" stroke="${BLUE}" stroke-width="2"/><circle cx="${CX}" cy="${CY}" r="${HUB*.62}" fill="url(#dp)"/>`;
-const mark=s=>`<g transform="translate(${CX} ${CY}) rotate(45) scale(${s})">`;
-const tiles=(f1,f2)=>`<rect x="-31.5" y="-31.5" width="27" height="27" fill="${f1}"/><rect x="4.5" y="4.5" width="27" height="27" fill="${f1}"/><rect x="4.5" y="-31.5" width="27" height="27" fill="${f2}"/><rect x="-31.5" y="4.5" width="27" height="27" fill="${f2}"/></g>`;
-// the pointer, at 180°, pointing into the wheel
-const PX=CX-R-6,ptr=f=>`<path d="M${PX-40} ${CY-22} L${PX-40} ${CY+22} L${PX+18} ${CY}Z" fill="${f}"/>`;
+knock+=`<circle cx="${CX}" cy="${CY}" r="${HUB}" fill="${PAPER}"/><circle cx="${CX}" cy="${CY}" r="${HUB-12}" fill="none" stroke="${BLUE}" stroke-width="2"/>
+  <g transform="translate(${CX} ${CY}) rotate(45) scale(1.15)"><rect x="-31.5" y="-31.5" width="27" height="27" fill="${BLUE}"/><rect x="4.5" y="4.5" width="27" height="27" fill="${BLUE}"/><rect x="4.5" y="-31.5" width="27" height="27" fill="${PINK}"/><rect x="-31.5" y="4.5" width="27" height="27" fill="${PINK}"/></g>`;
+// the pointer, at 180°, pointing into the wheel (symmetric about the wheel's horizontal axis)
+const PX=CX-R-6,ptr=`<path d="M${PX-40} ${CY-22} L${PX-40} ${CY+22} L${PX+18} ${CY}Z" fill="${BLUE}"/>`;
 document.getElementById('wheel').innerHTML=`<defs>
-  <pattern id="dp" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(15)"><circle cx="4.5" cy="4.5" r="2.7" fill="${PINK}"/></pattern>
-  <pattern id="db" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(75)"><circle cx="4.5" cy="4.5" r="2.5" fill="${BLUE}"/></pattern></defs>
-  <g class="plate">${blue}${ptr(BLUE)}</g>
-  <g class="plate" transform="translate(4 -3)">${pink}${ptr(PINK)}</g>
-  <g>${knock}</g>
-  <g class="plate">${hub}${mark(1.05)}${tiles(BLUE,'transparent')}</g>
-  <g class="plate" transform="translate(4 -3)">${mark(1.05)}${tiles('transparent',PINK)}</g>`;
+  <pattern id="dp" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><circle cx="4.5" cy="4.5" r="2.6" fill="${PINK}"/></pattern></defs>
+  <g class="plate">${pink}</g><g class="plate">${blue}${ptr}</g><g>${knock}</g>`;
 </script>
 </body>
 </html>
