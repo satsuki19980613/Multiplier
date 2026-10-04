@@ -7,7 +7,7 @@
 //   &mult=n    fix the prize multiplier (e.g. &mult=100 to check the big-prize wheel). The free-roll has no multiplier.
 //   &idle      the bots never move (the human's turn clock / sit-out can be checked)
 import{
-  MoveError,STAKE_KEYS,botName,buyInOf,checkEntry,shuffle,createTable,applyRequest,tick,viewsOf,commit,
+  MoveError,STAKE_KEYS,botNames,buyInOf,checkEntry,shuffle,createTable,applyRequest,tick,viewsOf,commit,
 }from'../server/game/rules.js';
 import{actor}from'./engine.js';
 import{botMove,PERSONAS}from'./bot.js';
@@ -50,8 +50,8 @@ function store(game,step,seat){
 const reply=()=>({ver:G.game.state.ver,now:Date.now(),view:structuredClone(G.views[G.seat])});
 
 function makeTable(stake){
-  const rnd=Math.random,botPersonas=shuffle(PERSONAS,rnd).slice(0,2);
-  const players=shuffle([{uid:'me',name:me.nickname,bot:null},...botPersonas.map(p=>({uid:null,name:botName(p),bot:{persona:p}}))],rnd);
+  const rnd=Math.random,botPersonas=shuffle(PERSONAS,rnd).slice(0,2),bn=botNames(2,rnd);
+  const players=shuffle([{uid:'me',name:me.nickname,bot:null},...botPersonas.map((p,i)=>({uid:null,name:bn[i],bot:{persona:p}}))],rnd);
   const t=createTable({players,stake,now:Date.now(),rnd,forceMultiplier:MULT||null});
   if(stake==='free'){fr.day=jstDay();fr.used=frUsed()+1}else me.chips-=buyInOf(stake);
   G={id:crypto.randomUUID(),seat:players.findIndex(p=>p.uid==='me'),game:t,views:null,status:'active'};

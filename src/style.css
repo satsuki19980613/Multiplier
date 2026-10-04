@@ -131,8 +131,7 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .q-stake{font-family:var(--f-num);font-weight:600;font-size:13px;letter-spacing:.16em;color:var(--muted)}
 .q-slots{display:flex;gap:10px}
 .q-slots i{width:46px;height:62px;border:1.5px dashed var(--hair-2);display:grid;place-items:center;font-style:normal;font-family:var(--f-num);font-weight:700;color:var(--muted);transition:background .25s,border-color .25s}
-.q-slots i.on{border:1.5px solid var(--you);background:var(--you-soft);color:var(--you-text);animation:slotIn .3s cubic-bezier(.2,.8,.2,1)}
-@keyframes slotIn{from{transform:scale(.85);opacity:.4}}
+.q-slots i.on{border:1.5px solid var(--you);background:var(--you-soft);color:var(--you-text)}
 .q-n{font-family:var(--f-num);font-weight:600;font-size:15px}
 .q-n b{font-size:20px}
 .q-count{position:relative;width:96px;height:96px;display:grid;place-items:center}

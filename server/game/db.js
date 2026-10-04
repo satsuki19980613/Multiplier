@@ -6,7 +6,7 @@
 import{randomUUID}from'node:crypto';
 import{
   MoveError,STAKE_KEYS,QUEUE_FRESH_MS,BOT_WAIT_MS,
-  botName,buyInOf,checkEntry,shuffle,createTable,applyRequest,tick,viewsOf,commit,
+  botNames,buyInOf,checkEntry,shuffle,createTable,applyRequest,tick,viewsOf,commit,
 }from'./rules.js';
 import{botMove as defaultBotMove,PERSONAS}from'../../src/bot.js';
 
@@ -117,10 +117,10 @@ export function makeDb(pool,deps={}){
       if(group.length<3&&!(self&&waited>=BOT_WAIT_MS))return reply(null,since);
 
       // make the table: humans first, bots to fill, seats shuffled
-      const personas=shuffle(PERSONAS,rnd).slice(0,3-group.length);
+      const personas=shuffle(PERSONAS,rnd).slice(0,3-group.length),bn=botNames(personas.length,rnd);
       const players=shuffle([
         ...group.map(p=>({uid:p.uid,name:p.nickname,bot:null})),
-        ...personas.map(pe=>({uid:null,name:botName(pe),bot:{persona:pe}})),
+        ...personas.map((pe,i)=>({uid:null,name:bn[i],bot:{persona:pe}})),
       ],rnd);
       const t=createTable({players,stake,now:now(),rnd});
       const humans=group.map(p=>p.uid);

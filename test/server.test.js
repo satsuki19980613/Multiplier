@@ -8,14 +8,18 @@ import{STAKES,FREEROLL,MULTIPLIERS,MULT_TOTAL,structureFor}from'../src/spin.js';
 import{botMove}from'../src/bot.js';
 import{
   MoveError,TURN_MS,TIMEBANK_MS,GRACE_MS,REVEAL_MS,WHEEL_MS,BOT_THINK_MS,SITOUT_MS,MAX_STRIKES,
-  botName,checkEntry,createTable,applyRequest,tick,viewsOf,settle,commit,publicMeta,humanAlive,finishBotsOnly,
+  BOT_NAMES,botNames,checkEntry,createTable,applyRequest,tick,viewsOf,settle,commit,publicMeta,humanAlive,finishBotsOnly,
 }from'../server/game/rules.js';
 import{createHandler}from'../server/game/handler.js';
 
 function mulberry(a){return()=>{a=(a+0x6D2B79F5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
 const T0=1_700_000_000_000;
 const human=(n,uid)=>({uid:uid??`u${n}`,name:'P'+n,bot:null});
-const bot=(persona)=>({uid:null,name:botName(persona),bot:{persona}});
+const bot=(persona)=>({uid:null,name:persona[0].toUpperCase()+persona.slice(1),bot:{persona}});
+
+test('botNames: distinct common first names, unrelated to the persona',()=>{
+  for(let k=1;k<50;k++){const n=botNames(2,rndFor(k));assert.equal(new Set(n).size,2);assert.ok(n.every(x=>BOT_NAMES.includes(x)&&!/tight|loose|aggro/i.test(x)))}
+});
 const rndFor=k=>mulberry(k);
 // a rnd whose first value picks a given multiplier of a stake (the first draw of createTable is the multiplier)
 const rndForMult=(stake,mult)=>{
