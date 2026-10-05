@@ -5,7 +5,7 @@ export const MAX_BODY=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // MoveError code -> HTTP status (anything else is 422)
 export const STATUS={not_found:404,no_profile:403,gone:409,stale:409,not_yet:409,game_over:409,already_out:409,not_your_turn:409,busy:409,
-  insufficient_chips:409,freeroll_unavailable:409,locked_stake:409,illegal:422};
+  insufficient_chips:409,freeroll_unavailable:409,illegal:422};
 
 export function createHandler(deps){
   const allowed=new Set(deps.allowedOrigins);

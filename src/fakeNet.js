@@ -60,7 +60,7 @@ function makeTable(stake){
   return G.id;
 }
 
-const waiting=stake=>{const w={low:0,mid:0,high:0,free:0};if(stake)w[stake]=1;return w};
+const waiting=stake=>{const w=Object.fromEntries(STAKE_KEYS.map(k=>[k,0]));if(stake)w[stake]=1;return w};
 
 const NAMES=['Kei','Mio','Ren','Aoi','Sora','Hina','Yuto','Nana','Haru','Riku','Mei','Sho'];
 function rankingRows(){

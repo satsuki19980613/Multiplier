@@ -7,7 +7,7 @@ export const fmt = n => Math.round(Number(n) || 0).toLocaleString('en-US');
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const setHTML = (el, h) => { if (el._h !== h) { el.innerHTML = h; el._h = h; return true } return false };
 export const head = (eye, title, cls = '') => `<div class="eyebrow">${eye}</div><h2${cls ? ` class="${cls}"` : ''}>${title}</h2>`;
-export const STAKE_LABEL = { low: 'LOW', mid: 'MID', high: 'HIGH', free: 'FREEROLL' };
+export const STAKE_LABEL = { low: 'LOW', mid: 'MID', high: 'HIGH', ultra: 'ULTRA', extreme: 'EXTREME', free: 'FREEROLL' };
 
 // shared app state. net is set at boot (net.js or ?fake); nav.* are set by main.js
 export const app = {

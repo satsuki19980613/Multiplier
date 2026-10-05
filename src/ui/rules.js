@@ -39,7 +39,7 @@ export function openRules() {
 
   <h3>Stakes<span>buy-in</span></h3>
   <dl class="spec">
-    ${Object.entries(STAKES).map(([k, s]) => `<dt>${STAKE_LABEL[k]}</dt><dd>buy-in ${fmt(s.buyIn)}${k === 'high' ? `（残高 ${fmt(s.minChips)} 以上で解放）` : `（残高 ${fmt(s.minChips)} 以上）`}</dd>`).join('')}
+    ${Object.entries(STAKES).map(([k, s]) => `<dt>${STAKE_LABEL[k]}</dt><dd>buy-in ${fmt(s.buyIn)}（最大 ${fmt(s.buyIn * MULTIPLIERS[k][0][0])}）</dd>`).join('')}
   </dl>
 
   <h3>Structure<span>倍率ごとのスタックとレベル時間</span></h3>

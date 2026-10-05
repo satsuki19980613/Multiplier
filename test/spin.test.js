@@ -12,18 +12,18 @@ test('each stake: occurrences sum to 10,000,000 and E[multiplier] is exactly 3 (
     assert.equal(weighted, 30000000, stake + ' E = 3.0 exactly (sum m*c = 3 * 10^7)');
     // sorted by multiplier, descending, no duplicates
     for (let i = 1; i < rows.length; i++) assert.ok(rows[i - 1][0] > rows[i][0]);
-    // the biggest prize is 100,000 at every stake (docs/research/03-economy.md §4)
-    assert.equal(rows[0][0] * STAKES[stake].buyIn, 100000, stake + ' top prize');
+    // the biggest prize is 100,000 at every stake but extreme (high risk, high return: 3,000,000. docs/research/03-economy.md §4)
+    assert.equal(rows[0][0] * STAKES[stake].buyIn, stake === 'extreme' ? 3000000 : 100000, stake + ' top prize');
   }
 });
 
-test('4x and above have the same probability at every stake (except the 100x/1000x/10000x jackpots)', () => {
+test('4x and above have the same probability at low to ultra (except the 50x/100x/1000x/10000x jackpots)', () => {
   const p = (stake, m) => (MULTIPLIERS[stake].find(r => r[0] === m) || [0, 0])[1];
-  for (const m of [25, 10, 5, 4]) { assert.equal(p('low', m), p('mid', m)); assert.equal(p('mid', m), p('high', m)); }
+  for (const m of [25, 10, 5, 4]) { assert.equal(p('low', m), p('mid', m)); assert.equal(p('mid', m), p('high', m)); assert.equal(p('high', m), p('ultra', m)); }
 });
 
 test('stakes and constants', () => {
-  assert.deepEqual(STAKES, { low: { buyIn: 10, minChips: 10 }, mid: { buyIn: 100, minChips: 100 }, high: { buyIn: 1000, minChips: 20000 } });
+  assert.deepEqual(STAKES, { low: { buyIn: 10 }, mid: { buyIn: 100 }, high: { buyIn: 1000 }, ultra: { buyIn: 2000 }, extreme: { buyIn: 3000 } });
   assert.deepEqual(FREEROLL, { prize: 500, perDay: 3, eligibleBelow: 10, stack: 500, levelMs: 120000 });
   assert.equal(START_CHIPS, 10000);
 });

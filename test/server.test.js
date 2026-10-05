@@ -30,13 +30,13 @@ const mk=(players,stake='low',seed=1,now=T0)=>createTable({players,stake,now,rnd
 const stored=t=>({state:t.state,meta:t.meta});
 const errCode=(f)=>{try{f()}catch(e){return e.code}return null};
 
-test('createTable: multiplier, prize and structure follow the draw (prize = buy-in x multiplier, at most 100,000)',()=>{
-  for(const stake of['low','mid','high'])for(const[m]of MULTIPLIERS[stake]){
+test('createTable: multiplier, prize and structure follow the draw (prize = buy-in x multiplier, at most 100,000; extreme up to 3,000,000)',()=>{
+  for(const stake of Object.keys(STAKES))for(const[m]of MULTIPLIERS[stake]){
     const t=createTable({players:[human(0),human(1),human(2)],stake,now:T0,rnd:rndForMult(stake,m)});
     assert.equal(t.meta.multiplier,m,`${stake} ${m}x`);
     assert.equal(t.meta.buyIn,STAKES[stake].buyIn);
     assert.equal(t.meta.prize,STAKES[stake].buyIn*m);
-    assert.ok(t.meta.prize<=100000);
+    assert.ok(t.meta.prize<=(stake==='extreme'?3000000:100000));
     const s=structureFor(m);
     assert.equal(t.state.levelMs,s.levelMs);
     assert.ok(t.state.handStart.every(x=>x===s.stack),'every seat starts with the structure stack');
@@ -64,10 +64,12 @@ test('createTable: the first clock starts after the wheel; a bot to act gets a t
 
 test('checkEntry: stake rules and free-roll eligibility',()=>{
   const ok=(p,s)=>assert.doesNotThrow(()=>checkEntry(p,s));
-  ok({chips:10,frUsedToday:0},'low');ok({chips:100,frUsedToday:0},'mid');ok({chips:20000,frUsedToday:0},'high');
+  ok({chips:10,frUsedToday:0},'low');ok({chips:100,frUsedToday:0},'mid');ok({chips:1000,frUsedToday:0},'high');
+  ok({chips:2000,frUsedToday:0},'ultra');ok({chips:3000,frUsedToday:0},'extreme');   // every stake is open from the start
   assert.equal(errCode(()=>checkEntry({chips:9,frUsedToday:0},'low')),'insufficient_chips');
   assert.equal(errCode(()=>checkEntry({chips:99,frUsedToday:0},'mid')),'insufficient_chips');
-  assert.equal(errCode(()=>checkEntry({chips:19999,frUsedToday:0},'high')),'locked_stake');
+  assert.equal(errCode(()=>checkEntry({chips:999,frUsedToday:0},'high')),'insufficient_chips');
+  assert.equal(errCode(()=>checkEntry({chips:2999,frUsedToday:0},'extreme')),'insufficient_chips');
   ok({chips:9,frUsedToday:2},'free');
   assert.equal(errCode(()=>checkEntry({chips:10,frUsedToday:0},'free')),'freeroll_unavailable');
   assert.equal(errCode(()=>checkEntry({chips:0,frUsedToday:3},'free')),'freeroll_unavailable');
@@ -463,7 +465,7 @@ const calls=[];
 const handler=createHandler({
   allowedOrigins:['http://localhost:5173'],
   verifyToken:async t=>t==='good'?U:null,
-  queue:async(uid,stake)=>{calls.push(['queue',uid,stake]);if(stake==='high')throw new MoveError('locked_stake');return{waiting:{low:1,mid:0,high:0,free:0},since:1,game:null}},
+  queue:async(uid,stake)=>{calls.push(['queue',uid,stake]);if(stake==='high')throw new MoveError('insufficient_chips');return{waiting:{low:1,mid:0,high:0,free:0},since:1,game:null}},
   leave:async uid=>{calls.push(['leave',uid]);return{ok:true}},
   act:async(uid,game,body)=>{calls.push(['act',uid,game,body]);if(body.ver===0)throw new MoveError('stale');return{ver:2,now:0,view:{op:'act'}}},
   retire:async(uid,game)=>{calls.push(['retire',uid,game]);if(game===GID.replace('aa','bb'))throw new MoveError('already_out');return{ver:4,now:0,view:{op:'retire'}}},
@@ -494,7 +496,7 @@ test('HTTP: routing, validation and error codes',async()=>{
   assert.equal(calls.length,0,'nothing reached the database');
   const q=await req({op:'queue',stake:'low'});assert.equal(q.status,200);assert.deepEqual((await q.json()).waiting.low,1);
   assert.deepEqual(calls.at(-1),['queue',U,'low']);
-  const hi=await req({op:'queue',stake:'high'});assert.equal(hi.status,409);assert.deepEqual(await hi.json(),{error:'locked_stake'});
+  const hi=await req({op:'queue',stake:'high'});assert.equal(hi.status,409);assert.deepEqual(await hi.json(),{error:'insufficient_chips'});
   assert.deepEqual(await(await req({op:'leave'})).json(),{ok:true});
   assert.equal((await req({op:'act',game:'x',ver:1,move:{type:'fold'}})).status,422);
   assert.equal((await req({op:'act',game:GID,ver:'1',move:{type:'fold'}})).status,422);
@@ -515,7 +517,7 @@ test('HTTP: routing, validation and error codes',async()=>{
 
 test('HTTP: every MoveError code has a status; unknown codes are 422',async()=>{
   const{STATUS}=await import('../server/game/handler.js');
-  for(const c of['not_found','gone','stale','not_yet','game_over','already_out','not_your_turn','busy','no_profile','insufficient_chips','freeroll_unavailable','locked_stake','illegal'])
+  for(const c of['not_found','gone','stale','not_yet','game_over','already_out','not_your_turn','busy','no_profile','insufficient_chips','freeroll_unavailable','illegal'])
     assert.ok(Number.isInteger(STATUS[c]),c);
   assert.equal(STATUS.not_found,404);assert.equal(STATUS.no_profile,403);
 });

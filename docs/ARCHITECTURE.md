@@ -28,17 +28,22 @@
 
 ```js
 export const START_CHIPS = 10000;
-export const STAKES = {            // key は API でも使う
-  low:  { buyIn: 10,   minChips: 10 },
-  mid:  { buyIn: 100,  minChips: 100 },
-  high: { buyIn: 1000, minChips: 20000 },   // High は残高 20,000 以上で解放
+export const STAKES = {            // key は API でも使う。どれも最初から解放（残高 ≥ buyIn で参加できる）
+  low:     { buyIn: 10 },
+  mid:     { buyIn: 100 },
+  high:    { buyIn: 1000 },
+  ultra:   { buyIn: 2000 },
+  extreme: { buyIn: 3000 },
 };
 export const FREEROLL = { prize: 500, perDay: 3, eligibleBelow: 10, stack: 500, levelMs: 120000 };
 // 1位総取り。各行は [倍率, 1,000万回あたりの出現数]。合計は 10,000,000、E[倍率] = 3.0（docs/research/03-economy.md §4）
+// 最高賞金は low〜ultra が 100,000、extreme だけ 3,000,000（ハイリスク・ハイリターン）
 export const MULTIPLIERS = {
   low:  [[10000,30],[1000,300],[100,3000],[25,20000],[10,100000],[5,300000],[4,800000],[3,5346660],[2,3430010]],
   mid:  [[1000,300],[100,3000],[25,20000],[10,100000],[5,300000],[4,800000],[3,5646600],[2,3130100]],
   high: [[100,5000],[25,20000],[10,100000],[5,300000],[4,800000],[3,5750000],[2,3025000]],
+  ultra: [[50,10000],[25,20000],[10,100000],[5,300000],[4,800000],[3,5760000],[2,3010000]],
+  extreme: [[1000,1000],[100,10000],[25,40000],[10,150000],[5,400000],[4,800000],[3,3102000],[2,5497000]],
 };
 export function drawMultiplier(stake, rnd)   // rnd: () => [0,1)。倍率（整数）を返す
 export function structureFor(multiplier)     // => { stack, levelMs }。倍率 null（フリーロール）は FREEROLL の stack/levelMs
@@ -137,7 +142,7 @@ export const BOT_WAIT_MS = 15000, QUEUE_FRESH_MS = 6000, SITOUT_MS = 1500, MAX_S
 export const BOT_THINK_MS = [900, 2600];             // Bot の思考時間（一様乱数）
 export class MoveError extends Error { code, extra }
 export function createTable({ players, stake, now, rnd })
-//   players: [{ uid|null, name, bot: null | { persona } } x3]。stake: 'low'|'mid'|'high'|'free'
+//   players: [{ uid|null, name, bot: null | { persona } } x3]。stake: 'low'|'mid'|'high'|'ultra'|'extreme'|'free'
 //   => { state, meta }。倍率は drawMultiplier（free は null）、prize = buyIn * multiplier（free は FREEROLL.prize）
 export function applyRequest(game, seat, req, now)   // req: { op:'act', ver, move }。=> { state, clock }
 export function tick(game, now, { botMove, rnd })    // Bot の手番で botAt を過ぎていれば Bot を1手進める。人間の deadline+GRACE を過ぎていれば autoAction（strike+1）
@@ -153,7 +158,7 @@ export function settle(state, meta)                  // 終局時：=> { payouts
 ### HTTP（`server/game/handler.js`。POST のみ、Bearer JWT 必須）
 | op | body | 返り値 |
 |---|---|---|
-| `queue` | `{ stake: 'low'\|'mid'\|'high'\|'free' }` | `{ waiting: {low,mid,high,free}, since, game: id\|null }`。待機登録（同じ stake のキューを更新）を行い、成立すれば卓を作る |
+| `queue` | `{ stake: 'low'\|'mid'\|'high'\|'ultra'\|'extreme'\|'free' }` | `{ waiting: {low,mid,high,ultra,extreme,free}, since, game: id\|null }`。待機登録（同じ stake のキューを更新）を行い、成立すれば卓を作る |
 | `leave` | `{}` | `{ ok: true }`。キューから抜ける |
 | `act` | `{ game, ver, move }` | `{ ver, now, view }` |
 | `retire` | `{ game }` | `{ ver, now, view }`。自分の席をリタイア（手番でなくても可。バイインは戻らず、賞金なし）。終局済みは 409 `game_over`、自席の順位が確定済みは 409 `already_out`、席が無ければ 404 `not_found` |
@@ -161,7 +166,7 @@ export function settle(state, meta)                  // 終局時：=> { payouts
 
 **マッチング**（`queue` の中で、stake 単位の advisory lock を取る）：
 1. 参加資格を確認する。
-   - low / mid / high：残高 ≥ minChips かつ ≥ buyIn。
+   - low / mid / high / ultra / extreme：残高 ≥ buyIn。
    - free：残高 < 10 かつ今日（JST）の使用回数 < 3。
    - 進行中の卓があればその id を返す。
 2. 新鮮な（seen_at が 6 秒以内の）待機者が 3人いれば、到着順に 3人で卓を作る。

@@ -40,7 +40,7 @@ export function makeDb(pool,deps={}){
   // counts of fresh waiting players per stake
   async function waitingCounts(c){
     const r=await c.query(`select stake,count(*)::int as n from public.queue where ${FRESH} group by stake`,[QUEUE_FRESH_MS]);
-    const w={low:0,mid:0,high:0,free:0};for(const x of r.rows)w[x.stake]=x.n;
+    const w=Object.fromEntries(STAKE_KEYS.map(k=>[k,0]));for(const x of r.rows)w[x.stake]=x.n;
     return w;
   }
 

@@ -82,9 +82,8 @@ function stakesHTML() {
   const chips = app.prof.chips;
   const rows = Object.entries(STAKES).map(([k, s]) => {
     const maxM = MULTIPLIERS[k][0][0];
-    let why = '';
-    if (chips < s.minChips) why = k === 'high' ? `残高 ${fmt(s.minChips)} 以上で解放` : `残高 ${fmt(s.minChips)} 以上で参加`;
-    return `<button class="mbtn stk-row${k === 'high' ? ' hi' : ''}" data-k="${k}" type="button" ${why ? 'disabled' : ''}>
+    const why = chips < s.buyIn ? `残高 ${fmt(s.buyIn)} 以上で参加` : '';
+    return `<button class="mbtn stk-row${s.buyIn >= 1000 ? ' hi' : ''}" data-k="${k}" type="button" ${why ? 'disabled' : ''}>
       <span class="nm3"><b>${STAKE_LABEL[k]}</b></span>
       <span style="text-align:right"><span class="buy">${fmt(s.buyIn)}</span><small>${why || `最大 ${fmt(s.buyIn * maxM)}`}</small></span></button>`;
   }).join('');

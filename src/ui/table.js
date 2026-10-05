@@ -242,7 +242,7 @@ async function showResult() {
   if (T !== t || !p) return;
   const bal = $('#ovBal'); if (bal) bal.textContent = fmt(p.chips);
   if (v.over || retired) {
-    const ok = stake === 'free' ? p.freeroll && p.freeroll.eligible : p.chips >= STAKES[stake].minChips && p.chips >= STAKES[stake].buyIn;
+    const ok = stake === 'free' ? p.freeroll && p.freeroll.eligible : p.chips >= STAKES[stake].buyIn;
     const b = $('#againBtn'); if (b) b.disabled = !ok;
   }
 }

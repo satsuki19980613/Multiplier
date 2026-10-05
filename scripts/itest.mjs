@@ -186,14 +186,15 @@ try{
   await freshQueue();
   await setChips(U[3],5);
   ok(await codeOf(()=>db.queue(U[3],'low'))==='insufficient_chips','5 chips: Low is refused');
-  ok(await codeOf(()=>db.queue(U[3],'high'))==='locked_stake','5 chips: High is locked');
-  ok(await codeOf(()=>db.queue(U[1],'high'))==='locked_stake','10,000 chips: High is locked');
+  ok(await codeOf(()=>db.queue(U[3],'high'))==='insufficient_chips','5 chips: High is refused');
+  await setChips(U[4],2999);
+  ok(await codeOf(()=>db.queue(U[4],'extreme'))==='insufficient_chips','2,999 chips: Extreme is refused');
   ok(await codeOf(()=>db.queue(U[1],'free'))==='freeroll_unavailable','10,000 chips: free-roll refused');
   ok(await codeOf(()=>db.queue(U[1],'vip'))==='illegal','unknown stake');
   const m3=await me(U[3]);ok(m3.freeroll.eligible&&m3.freeroll.left===3,'free-roll is available at 5 chips');
-  await setChips(U[4],25000);
-  await db.queue(U[4],'high');await pool.query("update public.queue set since=now()-interval '1 minute' where uid=$1",[U[4]]);
-  const gh=(await db.queue(U[4],'high')).game;ok(!!gh&&await chipsOf(U[4])===24000,'High opens at 20,000+ and costs 1,000');
+  await setChips(U[4],3000);
+  await db.queue(U[4],'extreme');await pool.query("update public.queue set since=now()-interval '1 minute' where uid=$1",[U[4]]);
+  const gh=(await db.queue(U[4],'extreme')).game;ok(!!gh&&await chipsOf(U[4])===0,'Extreme is open from the start and costs 3,000');
   await closeGames();
 
   // ---- free-roll: three a day ----

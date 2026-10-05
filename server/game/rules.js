@@ -15,7 +15,7 @@ export const TURN_MS=15000,TIMEBANK_MS=30000,GRACE_MS=1500,REVEAL_MS=3500,WHEEL_
 export const wheelMsFor=multiplier=>multiplier!=null&&multiplier>=100?WHEEL_BIG_MS:WHEEL_MS;
 export const BOT_WAIT_MS=15000,QUEUE_FRESH_MS=6000,SITOUT_MS=1500,MAX_STRIKES=2;
 export const BOT_THINK_MS=[900,2600];
-export const STAKE_KEYS=['low','mid','high','free'];
+export const STAKE_KEYS=[...Object.keys(STAKES),'free'];
 
 export class MoveError extends Error{
   constructor(code,extra){super(code);this.code=code;this.extra=extra}
@@ -35,7 +35,7 @@ export const botNames=(n,rnd)=>shuffle(BOT_NAMES,rnd).slice(0,n);
 /** buy-in of a stake key (free = 0) */
 export const buyInOf=stake=>stake==='free'?0:STAKES[stake].buyIn;
 
-/** Can this player enter `stake`? Throws MoveError(locked_stake | insufficient_chips | freeroll_unavailable).
+/** Can this player enter `stake`? Throws MoveError(insufficient_chips | freeroll_unavailable).
  *  p = { chips, frUsedToday } (frUsedToday = free-roll entries so far today in JST) */
 export function checkEntry(p,stake){
   if(!STAKE_KEYS.includes(stake))throw new MoveError('illegal');
@@ -43,8 +43,7 @@ export function checkEntry(p,stake){
     if(p.chips>=FREEROLL.eligibleBelow||p.frUsedToday>=FREEROLL.perDay)throw new MoveError('freeroll_unavailable');
     return;
   }
-  const s=STAKES[stake];
-  if(p.chips<s.minChips||p.chips<s.buyIn)throw new MoveError(s.minChips>s.buyIn?'locked_stake':'insufficient_chips');
+  if(p.chips<STAKES[stake].buyIn)throw new MoveError('insufficient_chips');
 }
 
 // a deterministic "random" in [0,1) from small integers (bot think time must be the same wherever it is computed)
