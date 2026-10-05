@@ -1,0 +1,40 @@
+# サーバー側（Neon の DB と Function "game"）を GitHub 上から更新する。
+# Actions タブの「Deploy server」→「Run workflow」で、dev か production を選んで手動で実行する。
+# リポジトリの Secrets に NEON_API_KEY（Neon の API キー）が必要。
+name: Deploy server
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 更新する Neon のブランチ
+        type: choice
+        options: [dev, production]
+        default: dev
+
+concurrency:
+  group: deploy-server-${{ inputs.branch }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      TARGET: ${{ inputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: 単体テスト
+        run: npm test
+      - name: マイグレーション
+        run: npm run db:migrate -- --branch "$TARGET"
+      - name: Function の配備
+        run: npm run deploy:game -- --branch "$TARGET"

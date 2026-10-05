@@ -45,6 +45,7 @@
 | ビルド | `npm run build` |
 | マイグレーション | `npm run db:migrate -- --branch dev`（Neon プロジェクトの作成後。本番は**さつきの確認後**） |
 | Function の配備 | `npm run deploy:game -- --branch dev`（同上） |
+| GitHub 上から更新 | Actions の「Deploy server」→ Run workflow で dev / production を選ぶ（マイグレーション → Function の配備。Secrets の `NEON_API_KEY` が必要。`.github/workflows/deploy-server.yml`） |
 
 ### インフラ（2026-10-04 作成）
 | 区分 | 内容 |
