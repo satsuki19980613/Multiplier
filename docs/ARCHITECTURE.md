@@ -138,6 +138,7 @@ export function botMove(view, seat, { persona, rnd })   // => move（applyAction
 ### `server/game/rules.js`（純粋関数。fakeNet からも使う）
 ```js
 export const TURN_MS = 15000, TIMEBANK_MS = 30000, GRACE_MS = 1500, REVEAL_MS = 3500, WHEEL_MS = 6000;
+export const MATCH_HUMANS = 2;
 export const BOT_WAIT_MS = 15000, QUEUE_FRESH_MS = 6000, SITOUT_MS = 1500, MAX_STRIKES = 2;
 export const BOT_THINK_MS = [900, 2600];             // Bot の思考時間（一様乱数）
 export class MoveError extends Error { code, extra }
@@ -169,8 +170,8 @@ export function settle(state, meta)                  // 終局時：=> { payouts
    - low / mid / high / ultra / extreme：残高 ≥ buyIn。
    - free：残高 < 10 かつ今日（JST）の使用回数 < 3。
    - 進行中の卓があればその id を返す。
-2. 新鮮な（seen_at が 6 秒以内の）待機者が 3人いれば、到着順に 3人で卓を作る。
-3. 呼び出した人の待機時間が BOT_WAIT_MS を超えたら、いる人間に Bot を足して 3人にする。
+2. 新鮮な（seen_at が 6 秒以内の）待機者が MATCH_HUMANS（= 2）人以上いれば、すぐに卓を作る（到着順に最大 3人。足りない席は Bot）。
+3. 呼び出した人の待機時間が BOT_WAIT_MS を超えたら（1人のまま）、Bot 2人を足して 3人にする。
 4. 卓を作るときは、同じトランザクションで次を行う。
    - バイインを引き落とす。
    - free の場合は使用回数を +1 する。

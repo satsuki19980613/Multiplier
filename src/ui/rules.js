@@ -31,7 +31,7 @@ export function openRules() {
     <dt>Multiplier</dt><dd>開始時に賞金の倍率がランダムに決まる。賞金 = buy-in × 倍率。</dd>
     <dt>Blinds</dt><dd>時間で上がる（Ante なし）。レベルが変わるのは次の hand から。最終レベルは据え置き。</dd>
     <dt>Turn</dt><dd>1手 15 秒＋タイムバンク。時間切れは Check、できなければ Fold。</dd>
-    <dt>Seats</dt><dd>3人集まらなければ、15 秒後に Bot が席を埋める。Bot の席には「Bot」と表示される。</dd>
+    <dt>Seats</dt><dd>2人そろったらすぐに始まり、空いた席は Bot が埋める。1人のときは 15 秒後に Bot 2人と始まる。Bot の席には「Bot」と表示される。</dd>
     <dt>Retire</dt><dd>テーブルの Retire ボタンでいつでも卓を抜けられる（確認あり）。その場で最下位として扱われ、buy-in は戻らない。着席中はメニューに戻れず、抜けるのは Retire か決着のときだけ。</dd>
     <dt>Heads-up</dt><dd>2人になったらボタンが SB。プリフロップは先に、ポストフロップは後に行動する。</dd>
     <dt>Ranking</dt><dd>Straight Flush &gt; Four of a Kind &gt; Full House &gt; Flush &gt; Straight &gt; Three of a Kind &gt; Two Pair &gt; Pair &gt; High Card</dd>
