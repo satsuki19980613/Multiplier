@@ -5,7 +5,7 @@
 // Lock order everywhere: season lock -> stake lock -> profiles (sorted by uid, FOR NO KEY UPDATE) ; act: games row -> profiles.
 import{randomUUID}from'node:crypto';
 import{
-  MoveError,STAKE_KEYS,QUEUE_FRESH_MS,BOT_WAIT_MS,
+  MoveError,STAKE_KEYS,QUEUE_FRESH_MS,BOT_WAIT_MS,MATCH_HUMANS,
   botNames,buyInOf,checkEntry,shuffle,createTable,applyRequest,tick,viewsOf,commit,
 }from'./rules.js';
 import{botMove as defaultBotMove,PERSONAS}from'../../src/bot.js';
@@ -103,7 +103,7 @@ export function makeDb(pool,deps={}){
         returning (extract(epoch from since)*1000)::float8 as since_ms,(extract(epoch from now()-since)*1000)::float8 as waited_ms`,[uid,stake]);
       const since=q.rows[0].since_ms,waited=q.rows[0].waited_ms;
 
-      // the three earliest fresh waiters; anybody who can no longer enter is dropped from the queue
+      // the (up to) three earliest fresh waiters; anybody who can no longer enter is dropped from the queue
       const fresh=await c.query(`select uid from public.queue where stake=$2 and ${FRESH} order by since,uid limit 4`,[QUEUE_FRESH_MS,stake]);
       const group=[];
       for(const r of fresh.rows){
@@ -114,7 +114,8 @@ export function makeDb(pool,deps={}){
         else if(r.uid!==uid)await c.query('delete from public.queue where uid=$1',[r.uid]);
       }
       const self=group.includes(P.get(uid));
-      if(group.length<3&&!(self&&waited>=BOT_WAIT_MS))return reply(null,since);
+      // MATCH_HUMANS players make a table at once; a lone player gets bots after BOT_WAIT_MS
+      if(group.length<MATCH_HUMANS&&!(self&&waited>=BOT_WAIT_MS))return reply(null,since);
 
       // make the table: humans first, bots to fill, seats shuffled
       const personas=shuffle(PERSONAS,rnd).slice(0,3-group.length),bn=botNames(personas.length,rnd);

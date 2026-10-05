@@ -94,11 +94,20 @@ try{
   ok(/nickname_invalid/.test(await codeOf(()=>rpc(U[1],'select public.set_nickname($1)',['🤖 Fake']))),'the robot mark is reserved');
   ok(/nickname_invalid/.test(await codeOf(()=>rpc(U[1],'select public.set_nickname($1)',['x'.repeat(17)]))),'nickname length');
 
-  // ---- three humans ----
-  let r=await db.queue(U[0],'low');ok(r.game===null&&r.waiting.low===1&&typeof r.since==='number','first player waits (1/3)');
-  r=await db.queue(U[1],'low');ok(r.game===null&&r.waiting.low===2,'second player waits (2/3)');
-  r=await db.queue(U[0],'low');ok(r.game===null&&r.waiting.low===2,'repeat call keeps the entry');
-  r=await db.queue(U[2],'low');const g1=r.game;ok(!!g1&&r.since===null,'third player starts the table');
+  // ---- two humans: the table starts at once, a bot takes the third seat ----
+  let r=await db.queue(U[0],'low');ok(r.game===null&&r.waiting.low===1&&typeof r.since==='number','first player waits (1 waiting)');
+  r=await db.queue(U[0],'low');ok(r.game===null&&r.waiting.low===1,'repeat call keeps the entry');
+  r=await db.queue(U[1],'low');const g0=r.game;ok(!!g0&&r.since===null,'second player starts the table at once');
+  ok((await db.queue(U[0],'low')).game===g0,'the first player is taken to that table');
+  const g0r=(await pool.query('select players from public.games where id=$1',[g0])).rows[0];
+  ok(g0r.players.filter(Boolean).length===2&&g0r.players.includes(U[0])&&g0r.players.includes(U[1]),'two humans + one bot (null seat)');
+  ok(await chipsOf(U[0])===9990&&await chipsOf(U[1])===9990,'both paid the buy-in');
+  await closeGames();
+  for(const u of U)await setChips(u,10000);
+
+  // ---- three humans: two already waiting when a third comes (e.g. they queued in the same instant) => one table of three ----
+  await pool.query("insert into public.queue(uid,stake) select unnest($1::uuid[]),'low'",[[U[0],U[1]]]);
+  r=await db.queue(U[2],'low');const g1=r.game;ok(!!g1&&r.since===null,'three waiting players sit at one table');
   ok((await db.queue(U[0],'low')).game===g1&&(await db.queue(U[1],'mid')).game===g1,'a player at a table gets that table from queue');
   ok(await chipsOf(U[0])===9990&&await chipsOf(U[1])===9990&&await chipsOf(U[2])===9990,'buy-ins were paid');
   ok((await me(U[0])).game===g1,'me() shows the table');
@@ -125,23 +134,24 @@ try{
   await Promise.all(U.slice(0,6).map(u=>db.queue(u,'mid')));
   const rs=await Promise.all(U.slice(0,6).map(u=>db.queue(u,'mid')));
   const ids=new Set(rs.map(x=>x.game));
-  ok(ids.size===2&&!ids.has(null),'six concurrent players make exactly two tables');
-  const act=(await pool.query("select players from public.games where status='active' and players && $1::uuid[]",[U])).rows.flatMap(x=>x.players);
+  ok(!ids.has(null)&&ids.size>=2&&ids.size<=3,`six concurrent players all get a table (${ids.size} tables)`);
+  const act=(await pool.query("select players from public.games where status='active' and players && $1::uuid[]",[U])).rows.flatMap(x=>x.players.filter(Boolean));
   ok(act.length===6&&new Set(act).size===6,'nobody sits at two tables');
+  const per=(await pool.query("select cardinality(array_remove(players,null))::int n from public.games where status='active' and players && $1::uuid[]",[U])).rows;
+  ok(per.every(x=>x.n>=2),'every table has at least two humans');
   await closeGames();
   for(const u of U)await setChips(u,10000);
 
   // ---- humans + bots ----
   await freshQueue();
-  await db.queue(U[0],'low');await db.queue(U[1],'low');
-  await agedQueue();
-  r=await db.queue(U[0],'low');const g2=r.game;ok(!!g2,'after the wait, bots fill the table');
+  await db.queue(U[0],'low');
+  r=await db.queue(U[1],'low');const g2=r.game;ok(!!g2,'two humans: a bot fills the table at once');
   const g2r=(await pool.query('select players from public.games where id=$1',[g2])).rows[0];
   ok(g2r.players.filter(Boolean).length===2&&g2r.players.includes(U[0])&&g2r.players.includes(U[1]),'two humans + one bot (null seat)');
   const v2=(await rpc(U[0],'select public.game_poll($1,-1)',[g2])).view;
   const bn=v2.names.filter((n,i)=>v2.meta.bot[i]);
   ok(bn.length===1&&v2.meta.bot.filter(Boolean).length===1,'one bot seat (flagged in meta.bot) '+bn);
-  ok((await db.queue(U[1],'low')).game===g2,'the other waiter is taken to the table too');
+  ok((await db.queue(U[0],'low')).game===g2,'the other waiter is taken to the table too');
   await playOut(g2,[U[0],U[1]],'2 humans + bot');
   await closeGames();
 
@@ -219,14 +229,13 @@ try{
   await freshQueue();
 
   // ---- stale queue entries are not matched ----
-  await db.queue(U[0],'low');await db.queue(U[1],'low');
-  await pool.query("update public.queue set seen_at=now()-interval '10 seconds' where uid=any($1::uuid[])",[[U[0],U[1]]]);
+  await pool.query("insert into public.queue(uid,stake,seen_at) select unnest($1::uuid[]),'low',now()-interval '10 seconds'",[[U[0],U[1]]]);
   r=await db.queue(U[2],'low');ok(r.game===null&&r.waiting.low===1,'entries not seen for 6 s do not count');
   await freshQueue();
 
   // ---- purge: 7 days after the last change; an abandoned active table gives the buy-ins back ----
   for(const u of U.slice(0,3))await setChips(u,10000);
-  await db.queue(U[0],'low');await db.queue(U[1],'low');const gp=(await db.queue(U[2],'low')).game;
+  await db.queue(U[0],'low');const gp=(await db.queue(U[1],'low')).game;
   const gold=(await pool.query(`insert into public.games(id,players,stake,multiplier,prize,status,state,ver,views,updated_at)
     values(gen_random_uuid(),$1::uuid[],'low',2,20,'over','{}',1,'[]',now()-interval '8 days') returning id`,[[U[4],null,null]])).rows[0].id;
   await pool.query("update public.games set updated_at=now()-interval '8 days' where id=$1",[gp]);
@@ -234,7 +243,7 @@ try{
   await me(U[0]);
   const left=(await pool.query('select id from public.games where id=any($1::uuid[])',[[gp,gold]])).rows;
   ok(left.length===0,'me() deletes games untouched for 7 days');
-  ok(await chipsOf(U[0])===c0+10&&await chipsOf(U[1])===9990+10&&await chipsOf(U[2])===9990+10,'buy-ins of the abandoned table were given back');
+  ok(await chipsOf(U[0])===c0+10&&await chipsOf(U[1])===9990+10,'buy-ins of the abandoned table were given back');
   ok((await me(U[0])).game===null,'abandoned table no longer blocks the player');
 
   // ---- season roll-over ----
