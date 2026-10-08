@@ -182,3 +182,32 @@ test('sitting out: a human with MAX_STRIKES time-outs is shown as sitout', () =>
   assert.ok(t.state.ver > g.state.ver);
   assert.ok(PACE.beat > 0);
 });
+
+test('two hands in one step (the next hand all-in from the blinds): both are shown in order, then the next deal or the end', async () => {
+  const { newGame, applyAction } = await import('../src/engine.js');
+  const { viewFor } = await import('../src/view.js');
+  const g = newGame({ stacks: [1000, 25, 0], button: 0, levelMs: 600000, now: 0, rnd: mulberry(11) });
+  const meta = { seat: 0, bot: [false, false, false], clock: { strikes: [0, 0, 0] }, stake: 'low', buyIn: 10, prize: 20, room: null };
+  const mvAt = () => ({ ...viewFor(g, 0), meta });
+  const before = tableViews(mvAt(), 0);
+  applyAction(g, 0, { type: 'raise', to: 40 }, 1);
+  applyAction(g, 1, { type: 'fold' }, 2);   // seat 1 is left with 5: the next hand is all-in from the small blind
+  const mv = mvAt();
+  const n = mv.lastHand.handNo;
+  assert.ok(n >= 2); assert.deepEqual(mv.prevHands.map(h => h.handNo), Array.from({ length: n - 1 }, (_, i) => i + 1));
+  const { views, settledNo } = tableViews(mv, before.settledNo);
+  assert.equal(settledNo, n);
+  const settled = views.filter(v => v.hand && v.hand.phase === 'settled');
+  assert.deepEqual(settled.map(v => v.hand.handNo), Array.from({ length: n }, (_, i) => i + 1), 'every hand of the chain, in order');
+  for (let i = 1; i < views.length; i++) assert.ok(views[i].ver > views[i - 1].ver, 'versions go up');
+  assert.ok(views[0].ver > mv.ver - 1 && views.at(-1).ver === mv.ver);
+  assert.equal(settled[0].players[1].stack, 5); assert.equal(settled[0].status, 'running');
+  assert.equal(settled[1].hand.runFrom, 0, 'hand 2 is run out from the deal');
+  const p = plan(settled[0], settled[1]);
+  assert.equal(p.kind, 'deal-showdown');
+  // views.at(-1) is the next hand, or the end of the game
+  const last = views.at(-1);
+  assert.ok(g.over ? last.status === 'finished' : last.hand.handNo === n + 1);
+  // the views hide the other seat's cards of the earlier hand too (the fold in hand 1)
+  assert.equal(mv.prevHands[0].hole[1], null);
+});

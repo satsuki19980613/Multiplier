@@ -3,14 +3,20 @@
 //   leave : delete from the queue
 //   act / retire / tick : the games row is locked (for update); on the last move the prize is credited in the same transaction
 //   room_* : private tables (rooms.js). The rooms row is locked (for update) -> profiles of its members -> buy-in -> INSERT games
+//   seat ops (sitout / sitin / fx / stay / depart) : the games row is locked, only meta changes
+//   rematch : the old games row is locked -> profiles of the people who stayed -> buy-in -> INSERT the new games row
+//   chat : games.chat_seq is bumped (row lock) -> INSERT game_chat. The game version is not touched (a chat would make moves stale)
+//   Every save also keeps the finished hands in game_hands (the hand history the browsers copy to their own IndexedDB).
 // Lock order everywhere: season lock -> stake lock | rooms row -> profiles (sorted by uid, FOR NO KEY UPDATE) ; act: games row -> profiles.
 import{randomUUID}from'node:crypto';
 import{
   MoveError,STAKE_KEYS,QUEUE_FRESH_MS,BOT_WAIT_MS,MATCH_HUMANS,
-  buyInOf,checkEntry,seatPlayers,createTable,applyRequest,tick,viewsOf,commit,
+  buyInOf,checkEntry,seatPlayers,createTable,applyRequest,tick,viewsOf,commit,finishedHands,rematchSeats,rematchStarted,postChat,
 }from'./rules.js';
+import{recordOf}from'../../src/tview.js';
+import{CHAT_ROOM_MAX}from'../../src/chat.js';
 import{
-  ROOM_STAKES,ROOM_SEATS,ROOM_MIN_START,ROOM_GONE_MS,ROOM_TTL_MS,genCode,newRoom,joinRoom,touchRoom,leaveRoom,startReady,roomView,roomPeek,
+  ROOM_STAKES,ROOM_SEATS,ROOM_MIN_START,ROOM_GONE_MS,ROOM_TTL_MS,genCode,newRoom,joinRoom,touchRoom,leaveRoom,startReady,roomView,roomPeek,roomHumans,
 }from'./rooms.js';
 import{botMove as defaultBotMove,PERSONAS}from'../../src/bot.js';
 
@@ -48,9 +54,14 @@ export function makeDb(pool,deps={}){
     return w;
   }
 
-  // write a step of a game back: credit the prize if it ended, store state / meta / views. Returns what the caller replies.
+  // write a step of a game back: keep the hands that finished, credit the prize if it ended, store state / meta / views.
+  // Returns what the caller replies.
   async function save(c,row,seat,step){
     const out=commit({state:row.g,meta:row.meta},step),{state,meta}=out;
+    for(const h of finishedHands(row.g,state)){
+      await c.query('insert into public.game_hands(game,hand_no,rec,holes) values($1,$2,$3,$4) on conflict do nothing',
+        [row.id,h.handNo,JSON.stringify(recordOf(h)),JSON.stringify(h.hole)]);
+    }
     if(out.payouts){
       const humans=row.players.map((u,i)=>({u,i})).filter(x=>x.u).sort((a,b)=>a.u<b.u?-1:a.u>b.u?1:0);
       await c.query('select 1 from public.profiles where uid=any($1::uuid[]) order by uid for no key update',[humans.map(h=>h.u)]);
@@ -67,8 +78,8 @@ export function makeDb(pool,deps={}){
     return{ver:state.ver,now:now(),view:views[seat]};
   }
 
-  // Make a table for `humans` ([{ uid, name }], profiles locked by the caller; bots fill the empty seats): take the buy-ins (the free-roll
-  // counts an entry instead), INSERT the game and take the players off the queue. room = the code of a private table. => game id
+  // Make a table for `humans` ([{ uid, name, fx?, host? }], profiles locked by the caller; bots fill the empty seats): take the buy-ins (the
+  // free-roll counts an entry instead), INSERT the game and take the players off the queue. room = the code of a private table. => game id
   async function makeGame(c,{humans,stake,room=null}){
     const players=seatPlayers(humans,rnd,PERSONAS);
     const t=createTable({players,stake,now:now(),rnd,room});
@@ -133,19 +144,25 @@ export function makeDb(pool,deps={}){
     });
     if(!room.members.some(m=>m.uid===room.host)){room.status='closed';return room}
     if(room.members.length<(auto?ROOM_SEATS:ROOM_MIN_START))return room;   // somebody dropped: wait for more
-    room.game=await makeGame(c,{humans:room.members.map(m=>({uid:m.uid,name:P.get(m.uid).nickname})),stake:room.stake,room:room.code});
+    room.game=await makeGame(c,{humans:roomHumans(room,u=>P.get(u).nickname),stake:room.stake,room:room.code});
     room.status='started';
     return room;
   }
 
-  async function loadGame(c,uid,gameId){
+  // the caller's game row, locked. over = also a finished game (seat ops after the end: stay / leave / rematch / GIF)
+  async function loadGame(c,uid,gameId,over=false){
     const r=await c.query('select id,players,status,state from public.games where id=$1 for update',[gameId]);
     const row=r.rows[0];
     const seat=row?row.players.indexOf(uid):-1;
     if(seat<0)throw new MoveError('not_found');
-    if(row.status!=='active')throw new MoveError('game_over');
+    if(row.status!=='active'&&!over)throw new MoveError('game_over');
     return{seat,row:{id:row.id,players:row.players,g:row.state.g,meta:row.state.meta}};
   }
+  // a request of the seat on its game (act / retire / sitout / sitin / fx / stay / depart)
+  const request=(uid,gameId,req,over=false)=>tx(pool,async c=>{
+    const{seat,row}=await loadGame(c,uid,gameId,over);
+    return save(c,row,seat,applyRequest({state:row.g,meta:row.meta},seat,req,now()));
+  });
 
   return{
     // enter the queue of a stake (or refresh the entry). Returns the waiting counts and, when a table was made for the caller (or the
@@ -202,18 +219,55 @@ export function makeDb(pool,deps={}){
     }),
 
     // a move by a player at the table
-    act:(uid,gameId,body)=>tx(pool,async c=>{
-      const{seat,row}=await loadGame(c,uid,gameId);
-      const step=applyRequest({state:row.g,meta:row.meta},seat,{op:'act',ver:body.ver,move:body.move},now());
-      return save(c,row,seat,step);
-    }),
+    act:(uid,gameId,body)=>request(uid,gameId,{op:'act',ver:body.ver,move:body.move}),
 
     // the player leaves the tournament now (buy-in stays spent). Works on any turn; the game row is saved like after a move, which frees the
     // player (places set) and finishes a table that has no human left.
-    retire:(uid,gameId)=>tx(pool,async c=>{
-      const{seat,row}=await loadGame(c,uid,gameId);
-      const step=applyRequest({state:row.g,meta:row.meta},seat,{op:'retire'},now());
-      return save(c,row,seat,step);
+    retire:(uid,gameId)=>request(uid,gameId,{op:'retire'}),
+
+    // Away / I'm back
+    sitout:(uid,gameId)=>request(uid,gameId,{op:'sitout'}),
+    sitin:(uid,gameId)=>request(uid,gameId,{op:'sitin'}),
+    // the winner GIF changed during the game (private tables only; also after the end, for the rematch)
+    fx:(uid,gameId,fx)=>request(uid,gameId,{op:'fx',fx},true),
+    // after the end of a private table: stay for a rematch / leave the table (out of the rematch)
+    stay:(uid,gameId)=>request(uid,gameId,{op:'stay'},true),
+    depart:(uid,gameId)=>request(uid,gameId,{op:'depart'},true),
+
+    // the leader starts the rematch: the same stake with the people who stayed (who are not at another table and can pay; at least two),
+    // an empty seat goes to a bot. The old table points to the new one (rematch.next) so that the others follow. => { game, now }
+    rematch:(uid,gameId)=>tx(pool,async c=>{
+      await c.query('select public.season_rollover()');
+      const{seat,row}=await loadGame(c,uid,gameId,true);
+      const game={state:row.g,meta:row.meta},seats=rematchSeats(game,seat,now());
+      const uids=seats.map(s=>row.players[s]).filter(Boolean);
+      const P=await lockProfiles(c,uids),busy=await seatedAt(c,uids);
+      const ok=seats.filter(s=>{
+        const u=row.players[s],p=P.get(u);if(!p||busy.has(u))return false;
+        try{checkEntry(p,row.meta.stake);return true}catch{return false}
+      });
+      if(!ok.includes(seat)){const p=P.get(uid);if(p)checkEntry(p,row.meta.stake);throw new MoveError(busy.has(uid)?'in_game':'not_enough')}
+      if(ok.length<2)throw new MoveError('not_enough');
+      const fx=row.meta.fx||[];
+      const id=await makeGame(c,{humans:ok.map(s=>({uid:row.players[s],name:P.get(row.players[s]).nickname,fx:fx[s]??null,host:s===seat})),
+        stake:row.meta.stake,room:row.meta.room});
+      await save(c,row,seat,rematchStarted(game,id));
+      return{game:id,now:now()};
+    }),
+
+    // a chat message on a private table (also after the end, while the table is kept). => { now, msg: { seq, seat, text, at } }
+    chat:(uid,gameId,text)=>tx(pool,async c=>{
+      const r=await c.query('select players,state->\'meta\' as meta,chat_seq from public.games where id=$1 for update',[gameId]);
+      const row=r.rows[0],seat=row?row.players.indexOf(uid):-1;
+      if(seat<0)throw new MoveError('not_found');
+      if(row.chat_seq>=CHAT_ROOM_MAX)throw new MoveError('chat_full');
+      const last=await c.query('select (extract(epoch from max(created_at))*1000)::float8 as at from public.game_chat where game=$1 and seat=$2',[gameId,seat]);
+      const t=postChat({meta:row.meta},seat,text,last.rows[0].at==null?null:Number(last.rows[0].at),now());
+      const seq=row.chat_seq+1;
+      await c.query('update public.games set chat_seq=$2 where id=$1',[gameId,seq]);
+      const ins=await c.query(`insert into public.game_chat(game,seq,seat,text,created_at) values($1,$2,$3,$4,to_timestamp($5/1000.0))
+        returning (extract(epoch from created_at)*1000)::float8 as at`,[gameId,seq,seat,t,now()]);
+      return{now:now(),msg:{seq,seat,text:t,at:Math.round(Number(ins.rows[0].at))}};
     }),
 
     // advance the table by one step when something is due (a bot's turn, a time-out). Any human at the table may call it.
@@ -224,7 +278,7 @@ export function makeDb(pool,deps={}){
     }),
 
     // make a private room of `stake` (the caller is the host). Nothing is paid until the table starts.
-    roomCreate:(uid,stake)=>tx(pool,async c=>{
+    roomCreate:(uid,stake,fx=null)=>tx(pool,async c=>{
       if(!ROOM_STAKES.includes(stake))throw new MoveError('illegal');
       await c.query('select public.season_rollover()');
       const p=await checkRoomEntry(c,uid,stake);
@@ -233,7 +287,7 @@ export function makeDb(pool,deps={}){
         and (updated_at < now() - make_interval(secs => $1::float8 / 1000) or created_at < now() - make_interval(secs => $2::float8 / 1000))`,[ROOM_GONE_MS,ROOM_TTL_MS]);
       await c.query("delete from public.rooms where updated_at < now() - interval '1 day'");
       for(let i=0;i<8;i++){
-        const room=newRoom({id:randomUUID(),code:genCode(rnd),stake,uid,name:p.nickname,now:now()});
+        const room=newRoom({id:randomUUID(),code:genCode(rnd),stake,uid,name:p.nickname,now:now(),fx});
         const r=await c.query(`insert into public.rooms(id,code,stake,host,members,status,created_at) values($1,$2,$3,$4,$5,'waiting',to_timestamp($6/1000.0))
           on conflict (code) where status='waiting' do nothing returning id`,[room.id,room.code,stake,uid,JSON.stringify(room.members),room.createdAt]);
         if(r.rows[0]){await c.query('delete from public.queue where uid=$1',[uid]);return roomReply(room,uid)}
@@ -248,13 +302,13 @@ export function makeDb(pool,deps={}){
     }),
 
     // join a waiting room by its code; the third player starts the table
-    roomJoin:(uid,code)=>tx(pool,async c=>{
+    roomJoin:(uid,code,fx)=>tx(pool,async c=>{
       await c.query('select public.season_rollover()');
       const f=await c.query("select id from public.rooms where code=$1 and status='waiting' order by created_at desc limit 1",[code]);
       if(!f.rows[0])throw new MoveError('not_found');
       let room=await lockRoom(c,f.rows[0].id);
       const p=await checkRoomEntry(c,uid,room.stake);
-      room=joinRoom(room,uid,p.nickname,now());
+      room=joinRoom(room,uid,p.nickname,now(),fx);
       await c.query('delete from public.queue where uid=$1',[uid]);
       room=await startIfReady(c,room,uid,true);
       await saveRoom(c,room);

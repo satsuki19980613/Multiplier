@@ -6,7 +6,12 @@ export const MAX_BODY=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // MoveError code -> HTTP status (anything else is 422)
 export const STATUS={not_found:404,no_profile:403,gone:409,stale:409,not_yet:409,game_over:409,already_out:409,not_your_turn:409,busy:409,
-  insufficient_chips:409,freeroll_unavailable:409,in_game:409,room_closed:409,room_full:409,not_host:409,not_enough:409,away:409,illegal:422};
+  insufficient_chips:409,freeroll_unavailable:409,in_game:409,room_closed:409,room_full:409,not_host:409,not_enough:409,away:409,
+  chat_closed:409,chat_full:409,too_fast:429,malformed:422,illegal:422};
+// ops on the caller's game that take only { game }
+const GAME_OPS={retire:'retire',tick:'tick',sitout:'sitout',sitin:'sitin',stay:'stay',depart:'depart',rematch:'rematch'};
+// fx: a KLIPY slug, or null / missing (the value itself is normalised by the rules; only the type is checked here)
+const fxOk=x=>x==null||(typeof x==='string'&&x.length<=200);
 
 export function createHandler(deps){
   const allowed=new Set(deps.allowedOrigins);
@@ -33,19 +38,24 @@ export function createHandler(deps){
         case'act':
           if(!(typeof body.game==='string'&&UUID.test(body.game))||!Number.isInteger(body.ver)||!body.move||typeof body.move!=='object')return reply(422,{error:'malformed'});
           return reply(200,await deps.act(uid,body.game,{ver:body.ver,move:body.move}));
-        case'retire':
+        case'retire':case'tick':case'sitout':case'sitin':case'stay':case'depart':case'rematch':
           if(!(typeof body.game==='string'&&UUID.test(body.game)))return reply(422,{error:'malformed'});
-          return reply(200,await deps.retire(uid,body.game));
-        case'tick':
-          if(!(typeof body.game==='string'&&UUID.test(body.game)))return reply(422,{error:'malformed'});
-          return reply(200,await deps.tick(uid,body.game));
+          return reply(200,await deps[GAME_OPS[body.op]](uid,body.game));
+        case'fx':
+          if(!(typeof body.game==='string'&&UUID.test(body.game))||!fxOk(body.fx))return reply(422,{error:'malformed'});
+          return reply(200,await deps.fx(uid,body.game,body.fx??null));
+        case'chat':
+          if(!(typeof body.game==='string'&&UUID.test(body.game))||typeof body.text!=='string'||body.text.length>400)return reply(422,{error:'malformed'});
+          return reply(200,await deps.chat(uid,body.game,body.text));
         case'room_create':
-          if(!ROOM_STAKES.includes(body.stake))return reply(422,{error:'malformed'});
-          return reply(200,await deps.roomCreate(uid,body.stake));
+          if(!ROOM_STAKES.includes(body.stake)||!fxOk(body.fx))return reply(422,{error:'malformed'});
+          return reply(200,await deps.roomCreate(uid,body.stake,body.fx??null));
         case'room_peek':
-        case'room_join':
           if(!(typeof body.code==='string'&&CODE_RE.test(body.code)))return reply(422,{error:'malformed'});
-          return reply(200,await(body.op==='room_peek'?deps.roomPeek:deps.roomJoin)(uid,body.code));
+          return reply(200,await deps.roomPeek(uid,body.code));
+        case'room_join':
+          if(!(typeof body.code==='string'&&CODE_RE.test(body.code))||!fxOk(body.fx))return reply(422,{error:'malformed'});
+          return reply(200,await deps.roomJoin(uid,body.code,body.fx));
         case'room_wait':
         case'room_start':
         case'room_leave':

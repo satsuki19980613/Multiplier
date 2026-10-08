@@ -86,12 +86,15 @@ export function liveView(mv) {
   return v;
 }
 
-/** 精算済みのハンドを見せる卓のビュー（ver はそのビューの ver）。スタックは精算した直後（次のハンドのブラインドの前） */
-export function settledView(mv, ver) {
-  const lh = mv.lastHand, v = base(mv, ver);
+/** 精算済みのハンド lh（既定は lastHand）を見せる卓のビュー（ver はそのビューの ver）。スタックは精算した直後（次のハンドのブラインドの前）。
+ *  席の状態はそのハンドの時点：配られていない席とこのハンドで飛んだ席は out（順位はもう決まっている） */
+export function settledView(mv, ver, lh = mv.lastHand) {
+  const v = base(mv, ver);
   v.players = players(mv, lh.start.map((x, s) => x + lh.net[s]));
-  // まだ終局していないビューから作るとき：このハンドで飛んだ席は out（順位は決まっている）。そうでなければ配られた次のハンドの状態どおり
+  const gone = new Set((lh.eliminated || []).map(e => e.seat));
+  v.players.forEach((p, s) => { if (lh.start[s] <= 0 || gone.has(s)) p.status = 'out'; else if (p.status === 'out') { p.status = 'active'; p.place = null; p.pt = null; } });
   v.hand = settledHand(lh);
+  if (lh !== mv.lastHand) { v.status = 'running'; v.endedAt = null; }
   return v;
 }
 
@@ -104,17 +107,17 @@ export function settledView(mv, ver) {
  */
 export function tableViews(mv, settledNo) {
   const lh = mv.lastHand, views = [];
-  const fresh = lh && lh.handNo > settledNo;
-  if (mv.over) {
-    if (lh && lh.handNo === mv.handNo) { views.push(settledView(mv, mv.ver)); return { views, settledNo: lh.handNo }; }
-    const v = base(mv, mv.ver); v.players = players(mv); v.hand = null;
-    if (fresh) views.push(settledView(mv, mv.ver - 0.5));
-    views.push(v);
-    return { views, settledNo: lh ? lh.handNo : settledNo };
-  }
-  if (fresh) views.push(settledView(mv, mv.ver - 0.5));
-  views.push(liveView(mv));
-  return { views, settledNo: lh ? Math.max(settledNo, lh.handNo) : settledNo };
+  // 新しく終わったハンド（古い順）。ふつうは 1 つ。ブラインドだけでオールインになったハンドが同じ手で続けて終わると 2 つ以上
+  const fresh = [...(mv.prevHands || []), lh].filter(x => x && x.handNo > settledNo);
+  const last = lh ? Math.max(settledNo, lh.handNo) : settledNo;
+  // 終局：最後のハンドが終局の手なら、そのハンドの精算済みのビューが最後のビュー
+  const endsWithLast = mv.over && lh && lh.handNo === mv.handNo;
+  const k = fresh.length - (endsWithLast ? 1 : 0);
+  for (let i = 0; i < k; i++) views.push(settledView(mv, mv.ver - 0.5 - (k - 1 - i) * 0.1, fresh[i]));
+  if (endsWithLast) views.push(settledView(mv, mv.ver));
+  else if (mv.over) { const v = base(mv, mv.ver); v.players = players(mv); v.hand = null; views.push(v); }
+  else views.push(liveView(mv));
+  return { views, settledNo: last };
 }
 
 /** 卓の操作（PrivateMatch の move：allin を含む）を Multiplier のエンジンの move に。l = 卓の形の合法手 */

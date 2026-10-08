@@ -124,7 +124,7 @@ export function newGame({ stack, levelMs, now = 0, rnd, names, stacks, button } 
     bet: [0, 0, 0], total: [0, 0, 0], folded: [false, false, false], allIn: [false, false, false],
     currentBet: 0, minRaise: BLINDS[0][1], handStart: st.slice(), seen: [null, null, null], needAct: [false, false, false],
     sbSeat: null, bbSeat: 0, actions: [], runFrom: null,
-    lastHand: null, places: [null, null, null], over: false, winner: null, log: [], forfeited: 0,
+    lastHand: null, prevHands: [], places: [null, null, null], over: false, winner: null, log: [], forfeited: 0,
   };
   let b = button;
   if (b == null) { const s = stream(g); b = s.below(3); s.done(); }
@@ -356,7 +356,10 @@ function finishHand(g, now) {
   const busted = SEATS.filter(s => !g.seats[s].out && g.seats[s].stack === 0);
   // the finished hand as the screen and the hand history need it. hole: everybody's cards (viewFor keeps only the seat's own and the shown ones);
   // commits: chips put in (before the uncalled part went back); won: chips taken from the table (the uncalled part included, so net = won - commits);
-  // runFrom: board size when the cards went face up (null when the hand ended with a fold)
+  // runFrom: board size when the cards went face up (null when the hand ended with a fold).
+  // prevHands keeps the four hands before it: with short stacks the next hands can be all-in from the blinds and finish in the same step
+  // (a short stack that keeps winning can chain several), and the screen / the hand history must still see every hand
+  if (g.lastHand) g.prevHands = [...(g.prevHands || []), g.lastHand].slice(-4);
   g.lastHand = {
     handNo: g.handNo, board: g.board.slice(), shown, pots, names, net, busted, endedAt: now, uncalled,
     startedAt: g.handAt, level: g.level, sb: g.sb, bb: g.bb, btn: g.button, sbSeat: g.sbSeat, bbSeat: g.bbSeat,
