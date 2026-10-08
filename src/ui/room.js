@@ -10,7 +10,9 @@ let R = null;                   // { id, v, timer, ui, busy }
 
 export const active = () => !!R;
 export const savedLobby = () => sessGet(LOBBY_KEY);
-export const inviteUrl = code => `${location.origin}/?room=${code}`;
+// openExternalBrowser=1: LINE opens the link in the phone's browser instead of its in-app one, so on Android an installed app
+// (its scope is the whole site) can take the link
+export const inviteUrl = code => `${location.origin}/?room=${code}&openExternalBrowser=1`;
 const spaced = code => String(code).replace(/(\d{3})(\d{3})/, '$1 $2');
 
 /** wait in a room. first = the reply of room_create / room_join ({ room, now }) when there is one */

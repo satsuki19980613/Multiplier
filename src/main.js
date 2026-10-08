@@ -58,7 +58,7 @@ function stashInvite() {
   const u = new URL(location.href), code = u.searchParams.get('room');
   if (code == null) return;
   if (CODE_RE.test(code)) sessSet(INVITE_KEY, code);
-  u.searchParams.delete('room'); history.replaceState(null, '', u.pathname + u.search + u.hash);
+  u.searchParams.delete('room'); u.searchParams.delete('openExternalBrowser'); history.replaceState(null, '', u.pathname + u.search + u.hash);
 }
 // after sign-in, when not seated at a table: the invite opens the join dialog; else a lobby left by a reload is resumed
 function resumeRoom() {
