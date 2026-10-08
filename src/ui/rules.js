@@ -30,11 +30,21 @@ export function openRules() {
     <dt>Format</dt><dd>3人の No Limit Hold'em トーナメント。1位が賞金を総取りし、2位・3位は 0。</dd>
     <dt>Multiplier</dt><dd>開始時に賞金の倍率がランダムに決まる。賞金 = buy-in × 倍率。</dd>
     <dt>Blinds</dt><dd>時間で上がる（Ante なし）。レベルが変わるのは次の hand から。最終レベルは据え置き。</dd>
-    <dt>Turn</dt><dd>1手 15 秒＋タイムバンク。時間切れは Check、できなければ Fold。</dd>
+    <dt>Turn</dt><dd>1手 15 秒＋タイムバンク。時間切れは Check、できなければ Fold。2回続けて時間切れになるか「離席」を押すと離席中になり、手番はすぐ自動で処理される。「I'm back」で戻る。</dd>
     <dt>Seats</dt><dd>2人そろったらすぐに始まり、空いた席は Bot が埋める。1人のときは 15 秒後に Bot 2人と始まる。Bot の席には「Bot」と表示される。</dd>
     <dt>Retire</dt><dd>テーブルの Retire ボタンでいつでも卓を抜けられる（確認あり）。その場で最下位として扱われ、buy-in は戻らない。着席中はメニューに戻れず、抜けるのは Retire か決着のときだけ。</dd>
     <dt>Heads-up</dt><dd>2人になったらボタンが SB。プリフロップは先に、ポストフロップは後に行動する。</dd>
     <dt>Ranking</dt><dd>Straight Flush &gt; Four of a Kind &gt; Full House &gt; Flush &gt; Straight &gt; Three of a Kind &gt; Two Pair &gt; Pair &gt; High Card</dd>
+  </dl>
+
+  <h3>Table</h3>
+  <dl class="spec">
+    <dt>BB</dt><dd>ベット・ポット・スタックは BB で表示する。スタックを押すとチップ数の表示に切り替わる（全員の席）。</dd>
+    <dt>Bet</dt><dd>Raise / Bet を押すと額のシート。候補（BB・倍・ポットの %）とスライダーの刻みは歯車の設定で変えられる（この端末に保存）。</dd>
+    <dt>Check/Fold</dt><dd>相手の手番の間に押しておくと、自分の番でチェック（できなければフォールド）を予約できる。</dd>
+    <dt>Showdown</dt><dd>オールインになると手札を表にし、勝率を出しながら残りのボードを 1 枚ずつ開く。</dd>
+    <dt>Player</dt><dd>席を押すとその人の VPIP・PFR などとメモ・色の印（この端末に保存）。Bot はこの試合の分だけ。</dd>
+    <dt>History</dt><dd>卓のヘッダからこの試合のハンド履歴。メニューの STATS で成績とすべてのハンド履歴（この端末に保存。書き出し・読み込みができる）。</dd>
   </dl>
 
   <h3>Stakes<span>buy-in</span></h3>
@@ -57,6 +67,9 @@ export function openRules() {
     <dt>Start</dt><dd>3人そろうとすぐに始まる。2人のときは作成者が Start を押せば始まり、空いた席は Bot が埋める。全員が待機画面にいるときだけ始まる。</dd>
     <dt>Chips</dt><dd>buy-in・倍率・賞金は PLAY と同じ。buy-in は卓が始まるときに残高から引かれる。</dd>
     <dt>Close</dt><dd>作成者が退出するか、作成から 10 分で部屋は閉じる。待機画面を 2 分離れると部屋から外れる。</dd>
+    <dt>Chat</dt><dd>PRIVATE の卓だけ。吹き出しで席の上に出る。全角 40 文字まで。</dd>
+    <dt>GIF</dt><dd>歯車の設定で GIF を選ぶと、PRIVATE の卓のショーダウンで勝ったときに卓の中央に出る（KLIPY の GIF）。</dd>
+    <dt>Rematch</dt><dd>終局後に「席に残る」を押した人で、同じ buy-in の卓をもう一度始められる（作成者か、作成者が来なければ最初に残った人が Rematch を押す。2人以上。buy-in はそのとき引かれる）。</dd>
   </dl>
 
   <h3>Freeroll</h3>

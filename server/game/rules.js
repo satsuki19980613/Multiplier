@@ -4,11 +4,15 @@
 //
 // A stored game is `{ state, meta }`:
 //   state = the engine state `g` (JSON, includes the deck: server only)
-//   meta  = { stake, buyIn, multiplier, prize, room: code | null (private table), bots: [null | { persona }] x3 (private), clock, result }
+//   meta  = { stake, buyIn, multiplier, prize, room: code | null (private table), bots: [null | { persona }] x3 (private), clock, result,
+//             fx: [slug | null] x3 | null (winner GIFs, private tables only), hostSeat (private), rematch (private, after the end) }
 //   clock = { turnStart, deadline, timebank: [ms x3], strikes: [x3], botAt }
 import{newGame,actor,applyAction,autoAction,forfeit,EngineError}from'../../src/engine.js';
 import{viewFor}from'../../src/view.js';
 import{STAKES,FREEROLL,drawMultiplier,structureFor}from'../../src/spin.js';
+import{runoutMs,FX_MS}from'../../src/pace.js';
+import{fxSeat,normalizeFx}from'../../src/fx.js';
+import{normalizeChat,CHAT_MIN_INTERVAL_MS}from'../../src/chat.js';
 
 export const TURN_MS=15000,TIMEBANK_MS=30000,GRACE_MS=1500,REVEAL_MS=3500,WHEEL_MS=6000,WHEEL_BIG_MS=9500;
 /** time the client's multiplier wheel may take before the first turn clock starts (×100 and above run a ~8 s show) */
@@ -18,6 +22,8 @@ export const MATCH_HUMANS=2;
 export const BOT_WAIT_MS=15000,QUEUE_FRESH_MS=6000,SITOUT_MS=1500,MAX_STRIKES=2;
 export const BOT_THINK_MS=[900,2600];
 export const STAKE_KEYS=[...Object.keys(STAKES),'free'];
+// private tables: after the end the players may stay at the table and start a rematch (same stake, same people; an empty seat is a bot)
+export const REMATCH_MS=10*60000,REMATCH_HOST_WAIT_MS=60000;
 
 export class MoveError extends Error{
   constructor(code,extra){super(code);this.code=code;this.extra=extra}
@@ -40,7 +46,7 @@ export const botNames=(n,rnd)=>shuffle(BOT_NAMES,rnd).slice(0,n);
 export function seatPlayers(humans,rnd,PERSONAS){
   const personas=shuffle(PERSONAS,rnd).slice(0,3-humans.length),bn=botNames(personas.length,rnd);
   return shuffle([
-    ...humans.map(p=>({uid:p.uid,name:p.name,bot:null})),
+    ...humans.map(p=>({uid:p.uid,name:p.name,bot:null,fx:p.fx??null,host:!!p.host})),
     ...personas.map((pe,i)=>({uid:null,name:bn[i],bot:{persona:pe}})),
   ],rnd);
 }
@@ -76,8 +82,8 @@ function clockAt(state,meta,clock,at){
   return{...clock,turnStart:at,deadline,botAt:null};
 }
 
-/** Create a table. players: [{ uid|null, name, bot: null|{persona} } x3]. room: the code of a private table (null from the queue).
- *  => { state, meta } (meta.clock starts after the wheel) */
+/** Create a table. players: [{ uid|null, name, bot: null|{persona}, fx?, host? } x3]. room: the code of a private table (null from the queue);
+ *  only a private table keeps the players' winner GIFs (fx) and the host's seat. => { state, meta } (meta.clock starts after the wheel) */
 // forceMultiplier: development/tests only (fakeNet &mult=); the server always draws
 export function createTable({players,stake,now,rnd,room=null,forceMultiplier=null}){
   if(!Array.isArray(players)||players.length!==3)throw new Error('createTable: 3 players required');
@@ -92,6 +98,10 @@ export function createTable({players,stake,now,rnd,room=null,forceMultiplier=nul
     bots:players.map(p=>p.bot?{persona:p.bot.persona}:null),
     clock:{turnStart:now,deadline:null,timebank:[TIMEBANK_MS,TIMEBANK_MS,TIMEBANK_MS],strikes:[0,0,0],botAt:null},
     result:null,
+    fx:room?players.map(p=>(p.bot?null:normalizeFx(p.fx??null))):null,
+    hostSeat:room?Math.max(0,players.findIndex(p=>p.host)):null,
+    rematch:null,
+    moveVer:state.ver,   // the last version that changed the play (applyRequest: an older move is stale; meta-only steps do not move it)
   };
   meta.clock=clockAt(state,meta,meta.clock,now+wheelMsFor(multiplier));
   return{state,meta};
@@ -122,8 +132,17 @@ function afterMove(before,state,now,seat,kind){
   }else if(kind==='timeout'&&strikes[seat]<MAX_STRIKES){
     strikes[seat]++;timebank[seat]=0;
   }
-  const bonus=!state.over&&state.handNo!==before.state.handNo?REVEAL_MS:0;
-  return clockAt(state,meta,{...c,timebank,strikes},now+bonus);
+  return clockAt(state,meta,{...c,timebank,strikes},now+revealBonus(before.state,state,meta));
+}
+
+/** Time the screen takes to show a finished hand before the next turn clock starts: the result (REVEAL_MS, which also covers dealing the next
+ *  hand), the showdown run-out (src/pace.js runoutMs) and the winner's GIF (private tables). h = a finished hand (engine lastHand) */
+export const revealMsOf=(h,fx)=>REVEAL_MS+runoutMs(h.runFrom)+(fxSeat(h,fx)!=null?FX_MS:0);
+/** the hands that finished between `before` and `state` (usually one; hands all-in from the blinds can chain), oldest first */
+export const finishedHands=(before,state)=>[...(state.prevHands||[]),state.lastHand].filter(h=>h&&h.handNo>=before.handNo&&(!before.lastHand||h.handNo>before.lastHand.handNo));
+function revealBonus(before,state,meta){
+  if(state.over||state.handNo===before.handNo)return 0;
+  return finishedHands(before,state).reduce((t,h)=>t+revealMsOf(h,meta.fx),0);
 }
 
 // a human retires: the seat leaves the tournament at once (see engine forfeit). Works on any turn. The buy-in is not refunded and nothing is paid.
@@ -138,14 +157,107 @@ function retire(game,seat,now){
   return{state:g,clock:same?game.meta.clock:afterMove(game,g,now,seat,'retire')};
 }
 
-/** Apply a human's request. game = { state, meta }; req = { op:'act', ver, move } or { op:'retire' }. => { state, clock }. Throws MoveError.
+// a step that only changes meta (seat state, GIF, rematch): the state gets a new version so that every seat's poll picks the views up.
+// A move made against the version before it is still taken (commit keeps meta.moveVer at the last version that changed the play, see applyRequest)
+function metaStep(game,patch){
+  const g=clone(game.state);g.ver++;
+  return{state:g,clock:patch.clock??game.meta.clock,meta:patch};
+}
+const humanSeat=(game,seat)=>Number.isInteger(seat)&&seat>=0&&seat<=2&&!game.meta.bots[seat];
+
+// Away (sit out) / I'm back. Sitting out = MAX_STRIKES: the turn is played for the seat SITOUT_MS after it starts. Coming back gives the running
+// turn its normal time again.
+function seatState(game,seat,away,now){
+  if(game.state.over)throw new MoveError('game_over');
+  if(!humanSeat(game,seat))throw new MoveError('not_found');
+  if(game.state.places[seat]!==null)throw new MoveError('already_out');
+  const c=game.meta.clock,strikes=[...c.strikes];
+  if(away===(strikes[seat]>=MAX_STRIKES))return metaStep(game,{clock:c});
+  strikes[seat]=away?MAX_STRIKES:0;
+  let deadline=c.deadline;
+  if(actor(game.state)===seat)deadline=away?Math.min(c.deadline??Infinity,Math.max(c.turnStart??now,now)+SITOUT_MS):Math.max(c.turnStart+TURN_MS+c.timebank[seat],now+TURN_MS);
+  return metaStep(game,{clock:{...c,strikes,deadline}});
+}
+
+// the winner GIF of a seat changed during the game (private tables only; elsewhere nothing happens)
+function setFx(game,seat,fx){
+  if(!humanSeat(game,seat))throw new MoveError('not_found');
+  const m=game.meta;
+  if(!m.room||!m.fx)return metaStep(game,{});
+  const v=normalizeFx(fx??null);
+  if(m.fx[seat]===v)return metaStep(game,{});
+  const next=[...m.fx];next[seat]=v;
+  return metaStep(game,{fx:next});
+}
+
+/** Who may start the rematch: the host while staying (or still possibly coming, up to REMATCH_HOST_WAIT_MS after the end), then the first
+ *  seat that stayed. rm = meta.rematch. => seat | null */
+export function rematchLeader(rm,now){
+  if(!rm)return null;
+  const host=rm.hostSeat;
+  if(host!=null&&rm.stay.includes(host))return host;
+  if(host!=null&&!rm.gone.includes(host)&&now<rm.endedAt+REMATCH_HOST_WAIT_MS)return host;
+  return rm.stay.length?rm.stay[0]:null;
+}
+/** the rematch can still be joined / started */
+export const rematchOpen=(rm,now)=>!!rm&&!rm.next&&now<rm.closesAt;
+
+// after the end of a private table: stay for a rematch / leave (the seat cannot be in the rematch any more)
+function stay(game,seat,now){
+  const rm=game.meta.rematch;
+  if(!humanSeat(game,seat))throw new MoveError('not_found');
+  if(!rematchOpen(rm,now)||rm.gone.includes(seat))throw new MoveError('room_closed');
+  if(rm.stay.includes(seat))return metaStep(game,{});
+  return metaStep(game,{rematch:{...rm,stay:[...rm.stay,seat]}});
+}
+function depart(game,seat){
+  const rm=game.meta.rematch;
+  if(!humanSeat(game,seat))throw new MoveError('not_found');
+  if(!rm||rm.next||rm.gone.includes(seat))return metaStep(game,{});
+  return metaStep(game,{rematch:{...rm,stay:rm.stay.filter(s=>s!==seat),gone:[...rm.gone,seat]}});
+}
+/** The rematch can start now from `seat`: the leader, at least two seats staying (the leader counts as staying). Throws not_host /
+ *  not_enough / room_closed. => the seats that stay (the caller included) */
+export function rematchSeats(game,seat,now){
+  const rm=game.meta.rematch;
+  if(!humanSeat(game,seat))throw new MoveError('not_found');
+  if(!rematchOpen(rm,now))throw new MoveError('room_closed');
+  if(rematchLeader(rm,now)!==seat)throw new MoveError('not_host');
+  const stayers=rm.stay.includes(seat)?rm.stay:[...rm.stay,seat];
+  if(stayers.length<2)throw new MoveError('not_enough');
+  return stayers;
+}
+/** the rematch has started (its game id; seats = the seats that are in it): those seats move there */
+export function rematchStarted(game,next,seats){
+  const rm=game.meta.rematch;
+  return metaStep(game,{rematch:{...rm,next:{id:next,seats:[...seats]}}});
+}
+
+/** A chat message on a private table. lastAt = the seat's previous message time (null if none). => normalised text. Throws MoveError
+ *  chat_closed (not a private table) / malformed / too_fast. Game state is not touched (chat has its own sequence). */
+export function postChat(game,seat,text,lastAt,now){
+  if(!Number.isInteger(seat)||seat<0||seat>2||game.meta.bots[seat])throw new MoveError('not_found');
+  if(!game.meta.room)throw new MoveError('chat_closed');
+  const t=normalizeChat(text);
+  if(t==null)throw new MoveError('malformed');
+  if(lastAt!=null&&now-lastAt<CHAT_MIN_INTERVAL_MS)throw new MoveError('too_fast');
+  return t;
+}
+
+/** Apply a human's request. game = { state, meta }; req = { op:'act', ver, move } | { op:'retire' } | { op:'sitout' } | { op:'sitin' }
+ *  | { op:'fx', fx } | { op:'stay' } | { op:'depart' }. => { state, clock, meta? (a patch of meta) }. Throws MoveError.
  *  The stored game is not mutated. */
 export function applyRequest(game,seat,req,now){
   if(req&&req.op==='retire')return retire(game,seat,now);
+  if(req&&(req.op==='sitout'||req.op==='sitin'))return seatState(game,seat,req.op==='sitout',now);
+  if(req&&req.op==='fx')return setFx(game,seat,req.fx);
+  if(req&&req.op==='stay')return stay(game,seat,now);
+  if(req&&req.op==='depart')return depart(game,seat);
   if(!req||req.op!=='act')throw new MoveError('illegal');
   if(game.state.over)throw new MoveError('game_over');
   if(!Number.isInteger(seat)||seat<0||seat>2||game.meta.bots[seat])throw new MoveError('not_your_turn');
-  if(req.ver!==game.state.ver)throw new MoveError('stale');
+  // stale = the play changed since the version the move was made on (steps that only changed meta do not count)
+  if(!Number.isInteger(req.ver)||req.ver>game.state.ver||req.ver<(game.meta.moveVer??game.state.ver))throw new MoveError('stale');
   if(actor(game.state)!==seat)throw new MoveError('not_your_turn');
   const move=toEngineMove(req.move),g=clone(game.state);
   engineCall(()=>applyAction(g,seat,move,now));
@@ -179,7 +291,7 @@ export function tick(game,now,{botMove,rnd=Math.random}={}){
 /** the public part of meta for one seat */
 export function publicMeta(meta,seat){
   return{stake:meta.stake,buyIn:meta.buyIn,multiplier:meta.multiplier,prize:meta.prize,room:meta.room??null,
-    bot:meta.bots.map(Boolean),clock:meta.clock,result:meta.result,seat};
+    bot:meta.bots.map(Boolean),clock:meta.clock,result:meta.result,seat,fx:meta.fx??null,rematch:meta.rematch??null};
 }
 
 /** the three views (what each seat may see) */
@@ -216,8 +328,10 @@ export function finishBotsOnly(state){
  *  A table with no human left is ended here (see finishBotsOnly).
  *  => { state, meta, payouts|null }. The caller credits `payouts`, may set meta.result.after, then calls viewsOf. */
 export function commit(game,step){
-  const meta={...game.meta,clock:step.clock};
+  const meta={...game.meta,...(step.meta||{}),clock:step.clock};
   let state=step.state;
+  if(!step.meta)meta.moveVer=state.ver;
+  if(game.state.over&&step.meta)return{state,meta,payouts:null};   // after the end only meta changes (stay / leave / rematch / GIF): nothing is paid again
   if(!state.over&&![0,1,2].some(s=>humanAlive(state,meta,s))){
     state=finishBotsOnly(state);
     meta.clock={...meta.clock,deadline:null,botAt:null};
@@ -225,5 +339,11 @@ export function commit(game,step){
   if(!state.over)return{state,meta,payouts:null};
   const s=settle(state,meta);
   meta.result=s.result;
+  // a private table can be played again by the people who stay (rematchLeader / rematchSeats)
+  if(meta.room){
+    // the end: the last hand's end, unless the game ended inside a hand that did not finish (a retire, only bots left)
+    const lh=state.lastHand,endedAt=(lh&&lh.handNo===state.handNo?lh.endedAt:step.clock.turnStart)??lh?.endedAt??0;
+    meta.rematch={stay:[],gone:[],next:null,hostSeat:meta.hostSeat??null,endedAt,closesAt:endedAt+REMATCH_MS};
+  }
   return{state,meta,payouts:s.payouts};
 }

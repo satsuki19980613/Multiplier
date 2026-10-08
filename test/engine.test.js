@@ -698,3 +698,67 @@ test('fuzz: 1500 tournaments with random retirements keep every invariant (stack
 test('fuzz: same seeds replay to exactly the same tournament', () => {
   for (const i of [1, 2, 3, 77, 123]) assert.equal(JSON.stringify(playTournament(i, false)), JSON.stringify(playTournament(i, false)));
 });
+
+/* ---------------- action records and the finished hand (for the table screen and the hand history) ---------------- */
+test('actions: every action of the hand is recorded with kind, betTo, put, auto and street (blinds are not actions)', () => {
+  const g = mk([1000, 1000, 1000], 0);
+  assert.deepEqual(g.actions, []); assert.deepEqual([g.sbSeat, g.bbSeat], [1, 2]);
+  A(g, 0, 'raise', 60); A(g, 1, 'call'); autoAction(g, 2, 0);
+  assert.deepEqual(g.actions, [
+    { seat: 0, kind: 'raise', betTo: 60, put: 60, auto: false, street: 0 },
+    { seat: 1, kind: 'call', betTo: 60, put: 50, auto: false, street: 0 },
+    { seat: 2, kind: 'fold', betTo: 60, put: 0, auto: true, street: 0 },
+  ]);
+  A(g, 1, 'raise', 100);
+  assert.deepEqual(g.actions.at(-1), { seat: 1, kind: 'bet', betTo: 100, put: 100, auto: false, street: 1 }, 'the first bet of a street is a bet');
+  A(g, 0, 'raise', 940);
+  assert.deepEqual(g.actions.at(-1), { seat: 0, kind: 'allin', betTo: 940, put: 940, auto: false, street: 1 }, 'the last chip in is all-in');
+  A(g, 1, 'call');
+  const lh = g.lastHand;
+  assert.equal(lh.handNo, 1); assert.equal(g.handNo, 2); assert.deepEqual(g.actions, [], 'the next hand starts a fresh record');
+  assert.deepEqual(lh.actions.at(-1), { seat: 1, kind: 'allin', betTo: 940, put: 840, auto: false, street: 1 });
+  assert.equal(lh.runFrom, 3, 'both all-in on the flop: the cards go face up with 3 board cards');
+  assert.deepEqual([lh.btn, lh.sbSeat, lh.bbSeat, lh.sb, lh.bb, lh.level, lh.startedAt], [0, 1, 2, 10, 20, 0, 0]);
+  assert.deepEqual(lh.start, [1000, 1000, 1000]); assert.deepEqual(lh.commits, [1000, 1000, 20]);
+  assert.deepEqual(lh.won.map((w, s) => w - lh.commits[s]), lh.net, 'net = won - commits');
+  assert.equal(sum(lh.won), sum(lh.commits), 'everything put in is taken back out');
+  assert.deepEqual(lh.folded, [false, false, true]); assert.deepEqual(lh.allIn, [true, true, false]);
+  assert.ok(lh.hole.every(h => h && h.length === 2), 'the state keeps every hole');
+  assert.deepEqual(lh.eliminated, lh.busted.map(s => ({ seat: s, place: g.places[s] })));
+});
+
+test('finished hand: runFrom is 5 for a normal showdown and null when a fold ends it; the uncalled part counts in won', () => {
+  const g = mk([1000, 1000, 1000], 0);
+  A(g, 0, 'call'); A(g, 1, 'call'); A(g, 2, 'check');
+  for (let k = 0; k < 3; k++) for (const s of [1, 2, 0]) A(g, s, 'check');
+  assert.equal(g.lastHand.runFrom, 5); assert.ok(g.lastHand.shown.every(Boolean));
+  const h = mk([1000, 1000, 1000], 0);
+  A(h, 0, 'raise', 300); A(h, 1, 'fold'); A(h, 2, 'fold');
+  const lh = h.lastHand;
+  assert.equal(lh.runFrom, null); assert.deepEqual(lh.shown, [null, null, null]);
+  assert.deepEqual(lh.commits, [300, 10, 20]); assert.deepEqual(lh.won, [330, 0, 0], 'the uncalled 280 comes back as part of won');
+  assert.deepEqual(lh.net, [30, -10, -20]);
+});
+
+test('a retire folds the hand with an automatic record, and a preflop all-in runs out from 0', () => {
+  const g = mk([1000, 1000, 1000], 0);
+  forfeit(g, 2, 0);
+  assert.deepEqual(g.actions, [{ seat: 2, kind: 'fold', betTo: 20, put: 0, auto: true, street: 0 }]);
+  A(g, 0, 'raise', 1000); A(g, 1, 'call');
+  assert.equal(g.lastHand.runFrom, 0);
+});
+
+test('viewFor: lastHand.hole keeps only the seat\'s own cards and the shown ones', () => {
+  const g = mk([1000, 1000, 1000], 0);
+  A(g, 0, 'raise', 60); A(g, 1, 'fold'); A(g, 2, 'call');
+  for (let k = 0; k < 3; k++) for (const s of [2, 0]) A(g, s, 'check');
+  const lh = g.lastHand;
+  for (const seat of [0, 1, 2, null]) {
+    const v = viewFor(g, seat).lastHand;
+    v.hole.forEach((h, i) => {
+      if (i === seat || lh.shown[i]) assert.deepEqual(h, lh.hole[i]); else assert.equal(h, null, `seat ${seat} sees seat ${i}`);
+    });
+  }
+  assert.equal(viewFor(g, 0).lastHand.hole[1], null, 'the folded seat 1 stays hidden from seat 0');
+  assert.ok(viewFor(g, 1).lastHand.hole[1], 'but seat 1 sees its own');
+});

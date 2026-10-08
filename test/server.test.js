@@ -251,6 +251,8 @@ test('views never leak the deck, the RNG, other seats\' hole cards or bot person
         if(i!==seat)assert.equal(h,null,'other hole cards hidden');
         else assert.deepEqual(h,state.holes[i]);
       });
+      const lh=v.lastHand;
+      if(lh)lh.hole.forEach((h,i)=>{if(i!==seat&&!(lh.shown&&lh.shown[i]))assert.equal(h,null,'other hole cards of the last hand hidden unless shown')});
       assert.equal(v.meta.multiplier,meta.multiplier);assert.equal(v.meta.prize,meta.prize);
     });
     assert.deepEqual(publicMeta(meta,1).seat,1);

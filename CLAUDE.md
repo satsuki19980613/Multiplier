@@ -5,7 +5,8 @@
 ## 1. 概要
 
 - **アプリ**: Multiplier（表示は「Multiplier — 3人ポーカートーナメント」）。3人 NLHE のハイパーターボ SNG で、開始時に賞金の倍率を抽選し、1位が総取りする。完全無料・広告なし・課金なしのプレイマネー。
-- **メニュー**: PLAY（ステークス 10 / 100 / 1,000 / 2,000 / 3,000。すべて最初から解放）／ PRIVATE（バイインを選んで部屋を作り、6 桁の部屋番号か招待 URL `/?room=123456` を共有する。3人そろうと開始、2人なら作成者が開始できて空席は Bot。チップは PLAY と同じく増減する。`server/game/rooms.js`）／ FREEROLL（残高 10 未満の人だけ。1日3回、賞金 500）／ RANKING（所有チップ数。半年ごとのシーズン制で、殿堂入りあり）。Google ログインが必須。
+- **メニュー**: PLAY（ステークス 10 / 100 / 1,000 / 2,000 / 3,000。すべて最初から解放）／ PRIVATE（バイインを選んで部屋を作り、6 桁の部屋番号か招待 URL `/?room=123456` を共有する。3人そろうと開始、2人なら作成者が開始できて空席は Bot。チップは PLAY と同じく増減する。`server/game/rooms.js`）／ FREEROLL（残高 10 未満の人だけ。1日3回、賞金 500）／ RANKING（所有チップ数。半年ごとのシーズン制で、殿堂入りあり）／ STATS（成績とハンド履歴。この端末に保存）。ヘッダの歯車で設定（ベットサイズ・演出 GIF）。Google ログインが必須。
+- **卓の画面**: PrivateMatch（`satsuki19980613/privatematch`）のプレイ画面を移植したもの（`src/ui/table.js` ほか）。Multiplier のビューは `src/tview.js` で卓の画面が読む形に写す。チャットと演出 GIF は PRIVATE の卓だけ。
 - **リポジトリ**: https://github.com/satsuki19980613/Spin-Go.git（リポジトリ名は内部名。公開名に「Spin & Go」は使わない）
 - **体制**: さつき＝デザイナー兼意思決定者。実装は Claude。判断が分かれる点は推測で進めず、さつきに確認する。
 - 技術構成は grid-holdem（`../grid-holdem`）を踏襲する。
@@ -26,6 +27,7 @@
 | 2026-10-04 | 利用規約・プライバシーポリシーは WWYD と同程度の分量に絞る（チップの扱い・禁止事項・18歳以上・国内向けは必ず残す）。連絡先は WWYD と同じメールアドレス |
 | 2026-10-05 | ステークスに ULTRA 2,000・EXTREME 3,000 を追加し、全ステークスを最初から解放する（残高がバイイン以上なら参加できる）。ULTRA は最高賞金 100,000（最高 ×50）。EXTREME はハイリスク・ハイリターンで最高 ×1,000（3,000,000）、×2 が 55%。RTP はどれも 100%（docs/research/03-economy.md §4） |
 | 2026-10-05 | 人間が 2人そろった時点で卓を始める（空いた席は Bot。1人のときは 15 秒後に Bot 2人。`MATCH_HUMANS`） |
+| 2026-10-08 | PrivateMatch のプレイ画面を移植する（卓・ドック・ベットのシートとベットサイズの設定・ショーダウンの演出・演出 GIF・チャット・プレイヤーのスタッツとメモ・ハンド履歴・STATS・PRIVATE の再戦）。チャットと演出 GIF は PRIVATE の卓だけ（知らない人と同じ卓でのチップの受け渡しの持ちかけを避ける）。スタッツ・ハンド履歴・メモは端末に保存 |
 | 2026-10-08 | プライベート卓（PRIVATE）を作る。PrivateMatch と同じく、バイインを選んで部屋を作り、部屋番号・招待 URL を共有する。残高は PLAY と同じく増減する。知り合い同士でチップを移せるリスク（docs/research/02-legal.md §5）は承知のうえで、利用規約に「参加者間の取り決め・やり取りについて運営者は責任を負わない」と明記する（§3 の 3 を改めた） |
 
 ## 3. 法務のガードレール（崩す変更はさつき＋専門家の確認が必要）
@@ -47,7 +49,8 @@
 | ビルド | `npm run build` |
 | マイグレーション | `npm run db:migrate -- --branch dev`（Neon プロジェクトの作成後。本番は**さつきの確認後**） |
 | Function の配備 | `npm run deploy:game -- --branch dev`（同上） |
-| GitHub 上から更新 | Actions の「Deploy server」→ Run workflow で dev / production を選ぶ（マイグレーション → Function の配備。Secrets の `NEON_API_KEY` が必要。`.github/workflows/deploy-server.yml`） |
+| GitHub 上から更新 | Actions の「Deploy server」→ Run workflow で dev / production を選ぶ（マイグレーション → Data API のスキーマの読み直し → Function の配備。Secrets の `NEON_API_KEY` が必要。`.github/workflows/deploy-server.yml`）。**「Use workflow from」は配備したいコードのあるブランチ**（ふつうは main） |
+| 演出 GIF（任意） | KLIPY（https://partner.klipy.com）で Web のアプリを作ってキーを得て、Cloudflare Pages の Variables に `VITE_KLIPY_KEY` を入れる（Production・Preview。ビルド時に読む公開の値）。キーが無ければ設定に「演出 GIF」が出ないだけ。開発は `?fake` で手元の見本を使える |
 
 ### インフラ（2026-10-04 作成）
 | 区分 | 内容 |
@@ -58,7 +61,7 @@
 | Function `game` | production: https://br-autumn-bar-b33acvo1-game.compute.c-4.ap-southeast-1.aws.neon.tech/ ・ dev: https://br-shy-boat-b3fs4jmg-game.compute.c-4.ap-southeast-1.aws.neon.tech/ |
 | ホスティング | Cloudflare Pages `multiplier-poker`（https://multiplier-poker.pages.dev。`multiplier.pages.dev` は他者が使用中）。GitHub 連携でビルド `npm run build`・出力 `dist` |
 
-URL を変えたら `.env.*`・`functions/api/auth/[[path]].js` の `UPSTREAM`・`public/_headers` の connect-src・`scripts/deploy-game.mjs` の許可 Origin を合わせる。
+URL を変えたら `.env.*`・`functions/api/auth/[[path]].js` の `UPSTREAM`・`public/_headers` の connect-src・`scripts/deploy-game.mjs` の許可 Origin を合わせる。`public/_headers` には KLIPY（`api.klipy.com`・`*.klipy.com` の画像）も入っている。
 
 ## 5. 規約
 
