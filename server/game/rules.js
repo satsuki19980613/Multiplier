@@ -4,7 +4,7 @@
 //
 // A stored game is `{ state, meta }`:
 //   state = the engine state `g` (JSON, includes the deck: server only)
-//   meta  = { stake, buyIn, multiplier, prize, bots: [null | { persona }] x3 (private), clock, result }
+//   meta  = { stake, buyIn, multiplier, prize, room: code | null (private table), bots: [null | { persona }] x3 (private), clock, result }
 //   clock = { turnStart, deadline, timebank: [ms x3], strikes: [x3], botAt }
 import{newGame,actor,applyAction,autoAction,forfeit,EngineError}from'../../src/engine.js';
 import{viewFor}from'../../src/view.js';
@@ -33,6 +33,17 @@ export const BOT_NAMES=['Liam','Noah','Oliver','Lucas','Mateo','Leo','Hugo','Eli
   'Nora','Ava','Isla','Maya','Zoe','Hanna','Ingrid','Freya','Aria','Julia'];
 /** n different bot names */
 export const botNames=(n,rnd)=>shuffle(BOT_NAMES,rnd).slice(0,n);
+
+/** The three players of a new table: the humans ([{ uid, name }]) and bots for the empty seats (personas: src/bot.js PERSONAS; not
+ *  imported here so the browser bundle, which uses rooms.js, does not carry the bot), seats shuffled.
+ *  => [{ uid|null, name, bot: null|{persona} } x3] (what createTable takes) */
+export function seatPlayers(humans,rnd,PERSONAS){
+  const personas=shuffle(PERSONAS,rnd).slice(0,3-humans.length),bn=botNames(personas.length,rnd);
+  return shuffle([
+    ...humans.map(p=>({uid:p.uid,name:p.name,bot:null})),
+    ...personas.map((pe,i)=>({uid:null,name:bn[i],bot:{persona:pe}})),
+  ],rnd);
+}
 
 /** buy-in of a stake key (free = 0) */
 export const buyInOf=stake=>stake==='free'?0:STAKES[stake].buyIn;
@@ -65,9 +76,10 @@ function clockAt(state,meta,clock,at){
   return{...clock,turnStart:at,deadline,botAt:null};
 }
 
-/** Create a table. players: [{ uid|null, name, bot: null|{persona} } x3]. => { state, meta } (meta.clock starts after the wheel) */
+/** Create a table. players: [{ uid|null, name, bot: null|{persona} } x3]. room: the code of a private table (null from the queue).
+ *  => { state, meta } (meta.clock starts after the wheel) */
 // forceMultiplier: development/tests only (fakeNet &mult=); the server always draws
-export function createTable({players,stake,now,rnd,forceMultiplier=null}){
+export function createTable({players,stake,now,rnd,room=null,forceMultiplier=null}){
   if(!Array.isArray(players)||players.length!==3)throw new Error('createTable: 3 players required');
   if(!STAKE_KEYS.includes(stake))throw new Error('createTable: bad stake '+stake);
   const free=stake==='free',buyIn=buyInOf(stake);
@@ -76,7 +88,7 @@ export function createTable({players,stake,now,rnd,forceMultiplier=null}){
   const{stack,levelMs}=structureFor(multiplier);
   const state=newGame({stack,levelMs,now,rnd,names:players.map(p=>p.name)});
   const meta={
-    stake,buyIn,multiplier,prize,
+    stake,buyIn,multiplier,prize,room,
     bots:players.map(p=>p.bot?{persona:p.bot.persona}:null),
     clock:{turnStart:now,deadline:null,timebank:[TIMEBANK_MS,TIMEBANK_MS,TIMEBANK_MS],strikes:[0,0,0],botAt:null},
     result:null,
@@ -166,7 +178,7 @@ export function tick(game,now,{botMove,rnd=Math.random}={}){
 
 /** the public part of meta for one seat */
 export function publicMeta(meta,seat){
-  return{stake:meta.stake,buyIn:meta.buyIn,multiplier:meta.multiplier,prize:meta.prize,
+  return{stake:meta.stake,buyIn:meta.buyIn,multiplier:meta.multiplier,prize:meta.prize,room:meta.room??null,
     bot:meta.bots.map(Boolean),clock:meta.clock,result:meta.result,seat};
 }
 

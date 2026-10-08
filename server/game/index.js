@@ -29,6 +29,12 @@ const handler=createHandler({
   act:db.act,
   retire:db.retire,
   tick:db.tick,
+  roomCreate:db.roomCreate,
+  roomPeek:db.roomPeek,
+  roomJoin:db.roomJoin,
+  roomWait:db.roomWait,
+  roomStart:db.roomStart,
+  roomLeave:db.roomLeave,
   logError(m,e){console.error(m,e instanceof Error?`${e.name}: ${e.message}`:String(e))},
 });
 

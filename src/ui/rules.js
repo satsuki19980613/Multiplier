@@ -51,6 +51,14 @@ export function openRules() {
   <div class="seg" id="multSeg">${Object.keys(STAKES).map((k, i) => `<button type="button" data-k="${k}" aria-pressed="${i === 0}">${STAKE_LABEL[k]}</button>`).join('')}</div>
   <div id="multTbl">${multTable('low')}</div>
 
+  <h3>Private</h3>
+  <dl class="spec">
+    <dt>Room</dt><dd>PRIVATE の CREATE で buy-in を選ぶと部屋ができ、6 桁の部屋番号と招待 URL が出る。友だちは JOIN に番号を入れるか、URL を開いて参加する。</dd>
+    <dt>Start</dt><dd>3人そろうとすぐに始まる。2人のときは作成者が Start を押せば始まり、空いた席は Bot が埋める。全員が待機画面にいるときだけ始まる。</dd>
+    <dt>Chips</dt><dd>buy-in・倍率・賞金は PLAY と同じ。buy-in は卓が始まるときに残高から引かれる。</dd>
+    <dt>Close</dt><dd>作成者が退出するか、作成から 10 分で部屋は閉じる。待機画面を 2 分離れると部屋から外れる。</dd>
+  </dl>
+
   <h3>Freeroll</h3>
   <dl class="spec">
     <dt>Entry</dt><dd>残高が ${fmt(fr.eligibleBelow)} 未満のときだけ。1日 ${fr.perDay} 回まで（日本時間 0 時にリセット）。</dd>

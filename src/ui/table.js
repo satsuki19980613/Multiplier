@@ -235,14 +235,14 @@ async function showResult() {
     const b = e.target.closest('[data-act]'); if (!b) return;
     if (b.dataset.act === 'watch') { dlg.close(); render() }
     if (b.dataset.act === 'menu') { dlg.close(); app.nav.toMenu() }
-    if (b.dataset.act === 'again') { dlg.close(); app.nav.playAgain(stake) }
+    if (b.dataset.act === 'again') { dlg.close(); app.nav.playAgain(stake, !!m.room) }
   };
   dlg.oncancel = e => e.preventDefault();
   const p = await app.nav.refreshMe();
   if (T !== t || !p) return;
   const bal = $('#ovBal'); if (bal) bal.textContent = fmt(p.chips);
   if (v.over || retired) {
-    const ok = stake === 'free' ? p.freeroll && p.freeroll.eligible : p.chips >= STAKES[stake].buyIn;
+    const ok = m.room ? true : stake === 'free' ? p.freeroll && p.freeroll.eligible : p.chips >= STAKES[stake].buyIn;
     const b = $('#againBtn'); if (b) b.disabled = !ok;
   }
 }
