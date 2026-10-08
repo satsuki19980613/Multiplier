@@ -2,12 +2,16 @@
 //   queue : advisory lock per stake -> profiles locked in uid order -> matching / bot fill -> buy-in -> INSERT games
 //   leave : delete from the queue
 //   act / retire / tick : the games row is locked (for update); on the last move the prize is credited in the same transaction
-// Lock order everywhere: season lock -> stake lock -> profiles (sorted by uid, FOR NO KEY UPDATE) ; act: games row -> profiles.
+//   room_* : private tables (rooms.js). The rooms row is locked (for update) -> profiles of its members -> buy-in -> INSERT games
+// Lock order everywhere: season lock -> stake lock | rooms row -> profiles (sorted by uid, FOR NO KEY UPDATE) ; act: games row -> profiles.
 import{randomUUID}from'node:crypto';
 import{
   MoveError,STAKE_KEYS,QUEUE_FRESH_MS,BOT_WAIT_MS,MATCH_HUMANS,
-  botNames,buyInOf,checkEntry,shuffle,createTable,applyRequest,tick,viewsOf,commit,
+  buyInOf,checkEntry,seatPlayers,createTable,applyRequest,tick,viewsOf,commit,
 }from'./rules.js';
+import{
+  ROOM_STAKES,ROOM_SEATS,ROOM_MIN_START,ROOM_GONE_MS,ROOM_TTL_MS,genCode,newRoom,joinRoom,touchRoom,leaveRoom,startReady,roomView,roomPeek,
+}from'./rooms.js';
 import{botMove as defaultBotMove,PERSONAS}from'../../src/bot.js';
 
 const LOCK_TIMEOUT='5s';
@@ -61,6 +65,77 @@ export function makeDb(pool,deps={}){
     await c.query(`update public.games set state=$2,ver=$3,views=$4,deadline_ms=$5,bot_at_ms=$6,status=$7,winner=$8,updated_at=now() where id=$1`,
       [row.id,JSON.stringify({g:state,meta}),state.ver,JSON.stringify(views),meta.clock.deadline,meta.clock.botAt,state.over?'over':'active',state.over?state.winner:null]);
     return{ver:state.ver,now:now(),view:views[seat]};
+  }
+
+  // Make a table for `humans` ([{ uid, name }], profiles locked by the caller; bots fill the empty seats): take the buy-ins (the free-roll
+  // counts an entry instead), INSERT the game and take the players off the queue. room = the code of a private table. => game id
+  async function makeGame(c,{humans,stake,room=null}){
+    const players=seatPlayers(humans,rnd,PERSONAS);
+    const t=createTable({players,stake,now:now(),rnd,room});
+    const ids=humans.map(h=>h.uid);
+    if(stake==='free'){
+      await c.query(`update public.profiles set freeroll_used=case when freeroll_day=(now() at time zone 'Asia/Tokyo')::date then freeroll_used+1 else 1 end,
+        freeroll_day=(now() at time zone 'Asia/Tokyo')::date where uid=any($1::uuid[])`,[ids]);
+    }else{
+      await c.query('update public.profiles set chips=chips-$2 where uid=any($1::uuid[])',[ids,buyInOf(stake)]);
+    }
+    const id=randomUUID(),views=viewsOf(t.state,t.meta);
+    await c.query(`insert into public.games(id,players,stake,multiplier,prize,status,state,ver,views,deadline_ms,bot_at_ms)
+      values($1,$2::uuid[],$3,$4,$5,'active',$6,$7,$8,$9,$10)`,
+      [id,players.map(p=>p.uid),stake,t.meta.multiplier,t.meta.prize,JSON.stringify({g:t.state,meta:t.meta}),t.state.ver,JSON.stringify(views),t.meta.clock.deadline,t.meta.clock.botAt]);
+    await c.query('delete from public.queue where uid=any($1::uuid[])',[ids]);
+    return id;
+  }
+
+  // lock profiles in uid order => Map uid -> { uid, nickname, chips, frUsedToday }
+  async function lockProfiles(c,uids){
+    const r=await c.query(`select uid,nickname,chips,freeroll_used,(freeroll_day=(now() at time zone 'Asia/Tokyo')::date) as fr_today
+      from public.profiles where uid=any($1::uuid[]) order by uid for no key update`,[[...uids].sort()]);
+    return new Map(r.rows.map(r=>[r.uid,{uid:r.uid,nickname:r.nickname,chips:Number(r.chips),frUsedToday:r.fr_today?r.freeroll_used:0}]));
+  }
+  // of `uids`, those still playing at a running table (an eliminated player is free) => Map uid -> game id
+  async function seatedAt(c,uids){
+    const r=await c.query("select id,players,state->'g'->'places' as places from public.games where status='active' and players && $1::uuid[]",[uids]);
+    return new Map(r.rows.flatMap(g=>g.players.map((u,i)=>u&&uids.includes(u)&&g.places[i]===null?[u,g.id]:null).filter(Boolean)));
+  }
+
+  /* ---------- private tables (rooms.js) ---------- */
+  const ROOM_COLS='id,code,stake,host,members,status,game,(extract(epoch from created_at)*1000)::float8 as created_ms';
+  const toRoom=r=>({id:r.id,code:r.code,stake:r.stake,host:r.host,members:r.members,status:r.status,game:r.game,createdAt:Number(r.created_ms)});
+  async function lockRoom(c,roomId){
+    const r=await c.query(`select ${ROOM_COLS} from public.rooms where id=$1 for update`,[roomId]);
+    if(!r.rows[0])throw new MoveError('not_found');
+    return toRoom(r.rows[0]);
+  }
+  const saveRoom=(c,room)=>c.query('update public.rooms set members=$2,status=$3,game=$4,updated_at=now() where id=$1',
+    [room.id,JSON.stringify(room.members),room.status,room.game]);
+  const roomReply=(room,uid)=>{const t=now();return{room:roomView(room,uid,t),now:t}};
+
+  // The caller may make or enter a room of `stake`: not seated at a running table (in_game, with the game) and able to pay.
+  async function checkRoomEntry(c,uid,stake){
+    const P=await lockProfiles(c,[uid]),p=P.get(uid);
+    if(!p)throw new MoveError('no_profile');
+    const s=await seatedAt(c,[uid]);
+    if(s.has(uid))throw new MoveError('in_game',{game:s.get(uid)});
+    checkEntry(p,stake);
+    return p;
+  }
+
+  // Start a waiting room's table when it is ready (auto: full; else the host asked). Members who can no longer play (seated at another
+  // table, short of the buy-in) are dropped first; if the host is dropped the room closes. Mutates and returns `room`.
+  async function startIfReady(c,room,uid,auto){
+    if(room.status!=='waiting'||!startReady(room,uid,now(),{auto}))return room;
+    const ids=room.members.map(m=>m.uid);
+    const P=await lockProfiles(c,ids),busy=await seatedAt(c,ids);
+    room.members=room.members.filter(m=>{
+      const p=P.get(m.uid);if(!p||busy.has(m.uid))return false;
+      try{checkEntry(p,room.stake);return true}catch{return false}
+    });
+    if(!room.members.some(m=>m.uid===room.host)){room.status='closed';return room}
+    if(room.members.length<(auto?ROOM_SEATS:ROOM_MIN_START))return room;   // somebody dropped: wait for more
+    room.game=await makeGame(c,{humans:room.members.map(m=>({uid:m.uid,name:P.get(m.uid).nickname})),stake:room.stake,room:room.code});
+    room.status='started';
+    return room;
   }
 
   async function loadGame(c,uid,gameId){
@@ -117,25 +192,7 @@ export function makeDb(pool,deps={}){
       // MATCH_HUMANS players make a table at once; a lone player gets bots after BOT_WAIT_MS
       if(group.length<MATCH_HUMANS&&!(self&&waited>=BOT_WAIT_MS))return reply(null,since);
 
-      // make the table: humans first, bots to fill, seats shuffled
-      const personas=shuffle(PERSONAS,rnd).slice(0,3-group.length),bn=botNames(personas.length,rnd);
-      const players=shuffle([
-        ...group.map(p=>({uid:p.uid,name:p.nickname,bot:null})),
-        ...personas.map((pe,i)=>({uid:null,name:bn[i],bot:{persona:pe}})),
-      ],rnd);
-      const t=createTable({players,stake,now:now(),rnd});
-      const humans=group.map(p=>p.uid);
-      if(stake==='free'){
-        await c.query(`update public.profiles set freeroll_used=case when freeroll_day=(now() at time zone 'Asia/Tokyo')::date then freeroll_used+1 else 1 end,
-          freeroll_day=(now() at time zone 'Asia/Tokyo')::date where uid=any($1::uuid[])`,[humans]);
-      }else{
-        await c.query('update public.profiles set chips=chips-$2 where uid=any($1::uuid[])',[humans,buyInOf(stake)]);
-      }
-      const id=randomUUID(),views=viewsOf(t.state,t.meta);
-      await c.query(`insert into public.games(id,players,stake,multiplier,prize,status,state,ver,views,deadline_ms,bot_at_ms)
-        values($1,$2::uuid[],$3,$4,$5,'active',$6,$7,$8,$9,$10)`,
-        [id,players.map(p=>p.uid),stake,t.meta.multiplier,t.meta.prize,JSON.stringify({g:t.state,meta:t.meta}),t.state.ver,JSON.stringify(views),t.meta.clock.deadline,t.meta.clock.botAt]);
-      await c.query('delete from public.queue where uid=any($1::uuid[])',[humans]);
+      const id=await makeGame(c,{humans:group.map(p=>({uid:p.uid,name:p.nickname})),stake});
       return reply(self?id:null,self?null:since);
     }),
 
@@ -164,6 +221,69 @@ export function makeDb(pool,deps={}){
       const{seat,row}=await loadGame(c,uid,gameId);
       const step=tick({state:row.g,meta:row.meta},now(),{botMove,rnd});
       return save(c,row,seat,step);
+    }),
+
+    // make a private room of `stake` (the caller is the host). Nothing is paid until the table starts.
+    roomCreate:(uid,stake)=>tx(pool,async c=>{
+      if(!ROOM_STAKES.includes(stake))throw new MoveError('illegal');
+      await c.query('select public.season_rollover()');
+      const p=await checkRoomEntry(c,uid,stake);
+      // housekeeping: close rooms nobody polls any more (their codes become free), forget old ones
+      await c.query(`update public.rooms set status='closed',updated_at=now() where status='waiting'
+        and (updated_at < now() - make_interval(secs => $1::float8 / 1000) or created_at < now() - make_interval(secs => $2::float8 / 1000))`,[ROOM_GONE_MS,ROOM_TTL_MS]);
+      await c.query("delete from public.rooms where updated_at < now() - interval '1 day'");
+      for(let i=0;i<8;i++){
+        const room=newRoom({id:randomUUID(),code:genCode(rnd),stake,uid,name:p.nickname,now:now()});
+        const r=await c.query(`insert into public.rooms(id,code,stake,host,members,status,created_at) values($1,$2,$3,$4,$5,'waiting',to_timestamp($6/1000.0))
+          on conflict (code) where status='waiting' do nothing returning id`,[room.id,room.code,stake,uid,JSON.stringify(room.members),room.createdAt]);
+        if(r.rows[0]){await c.query('delete from public.queue where uid=$1',[uid]);return roomReply(room,uid)}
+      }
+      throw new MoveError('busy');
+    }),
+
+    // what a room is (before joining). room: null when no room has the code
+    roomPeek:(uid,code)=>tx(pool,async c=>{
+      const r=await c.query(`select ${ROOM_COLS} from public.rooms where code=$1 order by created_at desc limit 1`,[code]);
+      return{room:r.rows[0]?roomPeek(toRoom(r.rows[0]),uid,now()):null,now:now()};
+    }),
+
+    // join a waiting room by its code; the third player starts the table
+    roomJoin:(uid,code)=>tx(pool,async c=>{
+      await c.query('select public.season_rollover()');
+      const f=await c.query("select id from public.rooms where code=$1 and status='waiting' order by created_at desc limit 1",[code]);
+      if(!f.rows[0])throw new MoveError('not_found');
+      let room=await lockRoom(c,f.rows[0].id);
+      const p=await checkRoomEntry(c,uid,room.stake);
+      room=joinRoom(room,uid,p.nickname,now());
+      await c.query('delete from public.queue where uid=$1',[uid]);
+      room=await startIfReady(c,room,uid,true);
+      await saveRoom(c,room);
+      return roomReply(room,uid);
+    }),
+
+    // a member's poll in the lobby (every ROOM_POLL_MS; a member who stops polling is dropped). A full room starts here.
+    roomWait:(uid,roomId)=>tx(pool,async c=>{
+      await c.query('select public.season_rollover()');
+      let room=touchRoom(await lockRoom(c,roomId),uid,now());
+      room=await startIfReady(c,room,uid,true);
+      await saveRoom(c,room);
+      return roomReply(room,uid);
+    }),
+
+    // the host starts with two players; the empty seat goes to a bot
+    roomStart:(uid,roomId)=>tx(pool,async c=>{
+      await c.query('select public.season_rollover()');
+      let room=touchRoom(await lockRoom(c,roomId),uid,now());
+      room=await startIfReady(c,room,uid,false);
+      await saveRoom(c,room);
+      return roomReply(room,uid);
+    }),
+
+    // leave the lobby (the host closes the room)
+    roomLeave:(uid,roomId)=>tx(pool,async c=>{
+      const r=await c.query(`select ${ROOM_COLS} from public.rooms where id=$1 for update`,[roomId]);
+      if(r.rows[0])await saveRoom(c,leaveRoom(toRoom(r.rows[0]),uid,now()));
+      return{ok:true};
     }),
   };
 }

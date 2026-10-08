@@ -6,9 +6,13 @@
 //   &chips=n   starting balance (default 10000). e.g. &chips=5 to see the free-roll
 //   &mult=n    fix the prize multiplier (e.g. &mult=100 to check the big-prize wheel). The free-roll has no multiplier.
 //   &idle      the bots never move (the human's turn clock / sit-out can be checked)
+//   &friend=ms private tables: how long until each simulated friend joins (default 3000). Two friends join a room you make (the
+//              third player starts it). Any code joins a room of Mio's (MID) where one more friend comes later; 000000 is not found.
+//              The friends are played by the bot but shown as people.
 import{
-  MoveError,STAKE_KEYS,botNames,buyInOf,checkEntry,shuffle,createTable,applyRequest,tick,viewsOf,commit,
+  MoveError,STAKE_KEYS,buyInOf,checkEntry,seatPlayers,shuffle,createTable,applyRequest,tick,viewsOf,commit,
 }from'../server/game/rules.js';
+import{ROOM_STAKES,genCode,newRoom,joinRoom,touchRoom,leaveRoom,startReady,roomView,roomPeek}from'../server/game/rooms.js';
 import{actor}from'./engine.js';
 import{botMove,PERSONAS}from'./bot.js';
 import{FREEROLL,seasonOf}from'./spin.js';
@@ -17,11 +21,13 @@ const q=new URLSearchParams(location.search);
 const WAIT=q.has('wait')?Math.max(0,+q.get('wait')||0):2000;
 const MULT=q.has('mult')?Math.round(+q.get('mult')):null;
 const IDLE=q.has('idle');
+const FRIEND=q.has('friend')?Math.max(0,+q.get('friend')||0):3000;
 
 const me={nickname:'Satsuki',chips:q.has('chips')?Math.max(0,Math.round(+q.get('chips')||0)):10000,played:0};
 const fr={day:'',used:0};
 let Q=null;   // { stake, since }
-let G=null;   // { id, seat, game: { state, meta }, views, status }
+let G=null;   // { id, seat, game: { state, meta }, views, status, friends: [seats] }
+let R=null;   // a private room: rooms.js room + { due: [{ at, uid, name }] } (friends still to come)
 
 const lag=v=>new Promise(r=>setTimeout(()=>r(structuredClone(v)),100+Math.random()*120));
 const jstDay=()=>new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
@@ -44,21 +50,53 @@ function store(game,step,seat){
     out.meta.result={...out.meta.result,after};
   }
   G.game={state:out.state,meta:out.meta};
-  G.views=viewsOf(out.state,out.meta);
+  G.views=views();
   if(out.state.over)G.status='over';
 }
 const reply=()=>({ver:G.game.state.ver,now:Date.now(),view:structuredClone(G.views[G.seat])});
+// the friends of a private table are played by the bot here, but are people on the real server: show them as such
+function views(){
+  const vs=viewsOf(G.game.state,G.game.meta);
+  for(const v of vs)for(const s of G.friends)v.meta.bot[s]=false;
+  return vs;
+}
 
-function makeTable(stake){
-  const rnd=Math.random,botPersonas=shuffle(PERSONAS,rnd).slice(0,2),bn=botNames(2,rnd);
-  const players=shuffle([{uid:'me',name:me.nickname,bot:null},...botPersonas.map((p,i)=>({uid:null,name:bn[i],bot:{persona:p}}))],rnd);
-  const t=createTable({players,stake,now:Date.now(),rnd,forceMultiplier:MULT||null});
+// friends: the other people of a private table ([{ uid, name }]); room: its code
+function makeTable(stake,friends=[],room=null){
+  const rnd=Math.random;
+  const players=seatPlayers([{uid:'me',name:me.nickname},...friends],rnd,PERSONAS);
+  const fp=shuffle(PERSONAS,rnd);
+  const fseats=players.map((p,i)=>p.uid&&p.uid!=='me'?i:-1).filter(i=>i>=0);
+  fseats.forEach((s,i)=>{players[s]={...players[s],bot:{persona:fp[i%fp.length]}}});
+  const t=createTable({players,stake,now:Date.now(),rnd,room,forceMultiplier:MULT||null});
   if(stake==='free'){fr.day=jstDay();fr.used=frUsed()+1}else me.chips-=buyInOf(stake);
-  G={id:crypto.randomUUID(),seat:players.findIndex(p=>p.uid==='me'),game:t,views:null,status:'active'};
-  G.views=viewsOf(t.state,t.meta);
+  G={id:crypto.randomUUID(),seat:players.findIndex(p=>p.uid==='me'),game:t,views:null,status:'active',friends:fseats};
+  G.views=views();
   Q=null;
   return G.id;
 }
+
+/* ---------- private tables ---------- */
+const FRIENDS=['Kei','Mio','Ren','Aoi','Sora','Hina'];
+function roomNow(){
+  const now=Date.now();
+  for(const d of R.due.filter(d=>d.at<=now)){R.due=R.due.filter(x=>x!==d);try{Object.assign(R,joinRoom(R,d.uid,d.name,now))}catch{/* full or closed */}}
+  for(const m of R.members)if(m.uid!=='me')m.seenAt=now;   // the friends keep polling
+}
+function roomStart(auto){
+  if(R.status!=='waiting'||!startReady(R,'me',Date.now(),{auto}))return;
+  checkEntry({chips:me.chips,frUsedToday:0},R.stake);
+  R.game=makeTable(R.stake,R.members.filter(m=>m.uid!=='me').map(m=>({uid:m.uid,name:m.name})),R.code);
+  R.status='started';R.due=[];
+}
+const roomReply=()=>({room:roomView(R,'me',Date.now()),now:Date.now()});
+function roomFor(code){
+  // any code but 000000 is a room of Mio's that one more friend joins later
+  if(code==='000000')return null;
+  const now=Date.now();
+  return{...newRoom({id:crypto.randomUUID(),code,stake:'mid',uid:'f-host',name:'Mio',now}),due:[{at:now+FRIEND*2,uid:'f2',name:'Kei'}]};
+}
+function noRoomGame(){if(active())throw new MoveError('in_game',{game:G.id})}
 
 const waiting=stake=>{const w=Object.fromEntries(STAKE_KEYS.map(k=>[k,0]));if(stake)w[stake]=1;return w};
 
@@ -110,6 +148,38 @@ export async function game(body){
       return{waiting:waiting(body.stake),since:Q.since,game:null,now:Date.now()};
     }
     case'leave':Q=null;return{ok:true};
+    case'room_create':{
+      if(!ROOM_STAKES.includes(body.stake))throw new MoveError('illegal');
+      noRoomGame();checkEntry({chips:me.chips,frUsedToday:0},body.stake);
+      const now=Date.now(),names=shuffle(FRIENDS,Math.random);
+      R={...newRoom({id:crypto.randomUUID(),code:genCode(Math.random),stake:body.stake,uid:'me',name:me.nickname,now}),
+        due:[{at:now+FRIEND,uid:'f1',name:names[0]},{at:now+FRIEND*2,uid:'f2',name:names[1]}]};
+      Q=null;return roomReply();
+    }
+    case'room_peek':{
+      if(R&&R.code===body.code)return{room:roomPeek(R,'me',Date.now()),now:Date.now()};
+      const r=roomFor(body.code);
+      return{room:r&&roomPeek(r,'me',Date.now()),now:Date.now()};
+    }
+    case'room_join':{
+      const r=R&&R.code===body.code&&R.status==='waiting'?R:roomFor(body.code);
+      if(!r)throw new MoveError('not_found');
+      noRoomGame();checkEntry({chips:me.chips,frUsedToday:0},r.stake);
+      R={...joinRoom(r,'me',me.nickname,Date.now()),due:r.due};
+      roomNow();roomStart(true);
+      return roomReply();
+    }
+    case'room_wait':case'room_start':{
+      if(!R||body.room!==R.id)throw new MoveError('not_found');
+      if(R.status==='waiting')roomNow();
+      R={...touchRoom(R,'me',Date.now()),due:R.due};
+      roomStart(body.op==='room_wait');
+      return roomReply();
+    }
+    case'room_leave':{
+      if(R&&body.room===R.id)R={...leaveRoom(R,'me',Date.now()),due:[]};
+      return{ok:true};
+    }
     case'act':case'tick':case'retire':{
       if(!G||body.game!==G.id)throw new MoveError('not_found');
       if(G.status!=='active')throw new MoveError('game_over');

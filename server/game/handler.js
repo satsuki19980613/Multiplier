@@ -1,11 +1,12 @@
 // Neon Function "game": HTTP behaviour (CORS, auth, routing). JWT checks and the database come in as deps so it can be unit-tested.
 import{MoveError,STAKE_KEYS}from'./rules.js';
+import{ROOM_STAKES,CODE_RE}from'./rooms.js';
 
 export const MAX_BODY=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // MoveError code -> HTTP status (anything else is 422)
 export const STATUS={not_found:404,no_profile:403,gone:409,stale:409,not_yet:409,game_over:409,already_out:409,not_your_turn:409,busy:409,
-  insufficient_chips:409,freeroll_unavailable:409,illegal:422};
+  insufficient_chips:409,freeroll_unavailable:409,in_game:409,room_closed:409,room_full:409,not_host:409,not_enough:409,away:409,illegal:422};
 
 export function createHandler(deps){
   const allowed=new Set(deps.allowedOrigins);
@@ -38,6 +39,18 @@ export function createHandler(deps){
         case'tick':
           if(!(typeof body.game==='string'&&UUID.test(body.game)))return reply(422,{error:'malformed'});
           return reply(200,await deps.tick(uid,body.game));
+        case'room_create':
+          if(!ROOM_STAKES.includes(body.stake))return reply(422,{error:'malformed'});
+          return reply(200,await deps.roomCreate(uid,body.stake));
+        case'room_peek':
+        case'room_join':
+          if(!(typeof body.code==='string'&&CODE_RE.test(body.code)))return reply(422,{error:'malformed'});
+          return reply(200,await(body.op==='room_peek'?deps.roomPeek:deps.roomJoin)(uid,body.code));
+        case'room_wait':
+        case'room_start':
+        case'room_leave':
+          if(!(typeof body.room==='string'&&UUID.test(body.room)))return reply(422,{error:'malformed'});
+          return reply(200,await deps[{room_wait:'roomWait',room_start:'roomStart',room_leave:'roomLeave'}[body.op]](uid,body.room));
         default:
           return reply(422,{error:'malformed'});
       }

@@ -142,7 +142,7 @@ export const MATCH_HUMANS = 2;
 export const BOT_WAIT_MS = 15000, QUEUE_FRESH_MS = 6000, SITOUT_MS = 1500, MAX_STRIKES = 2;
 export const BOT_THINK_MS = [900, 2600];             // Bot の思考時間（一様乱数）
 export class MoveError extends Error { code, extra }
-export function createTable({ players, stake, now, rnd })
+export function createTable({ players, stake, now, rnd, room })   // room: プライベート卓の部屋番号（キューからは null）
 //   players: [{ uid|null, name, bot: null | { persona } } x3]。stake: 'low'|'mid'|'high'|'ultra'|'extreme'|'free'
 //   => { state, meta }。倍率は drawMultiplier（free は null）、prize = buyIn * multiplier（free は FREEROLL.prize）
 export function applyRequest(game, seat, req, now)   // req: { op:'act', ver, move }。=> { state, clock }
@@ -180,6 +180,31 @@ export function settle(state, meta)                  // 終局時：=> { payouts
 
 **終局**：`settle` の払い戻しを profiles.chips に加算する（同じトランザクション内で）。
 
+### プライベート卓（`server/game/rooms.js`。純粋関数。fakeNet からも使う。2026-10-08）
+```js
+export const ROOM_SEATS = 3, ROOM_MIN_START = 2;
+export const ROOM_POLL_MS = 2000, ROOM_AWAY_MS = 8000, ROOM_GONE_MS = 120000, ROOM_TTL_MS = 600000;
+export const CODE_RE = /^\d{6}$/, ROOM_STAKES = ['low','mid','high','ultra','extreme'];   // free は不可
+// room = { id, code, stake, host, members: [{ uid, name, seenAt }]（入った順、作成者が先頭）, status: 'waiting'|'started'|'closed', game, createdAt }
+export function genCode(rnd) / newRoom({ id, code, stake, uid, name, now }) / prune(room, now) / joinRoom(room, uid, name, now)
+export function touchRoom(room, uid, now) / leaveRoom(room, uid, now) / startReady(room, uid, now, { auto })
+export function roomView(room, uid, now)   // 待機室：{ id, code, stake, status, host, members: [{ name, host, me, away }], seats, isHost, expiresAt, game }
+export function roomPeek(room, uid, now)   // 参加前：{ code, stake, status, host, seated, seats, member }（uid は出さない）
+```
+- 待機室は `room_wait` を 2 秒ごとに呼ぶ（これが在席の印）。最後の呼び出しから 8 秒で「離席中」（スマホで招待を別アプリに共有している間はページが止まるため、すぐには外さない）、2 分で部屋から外れる。作成者が外れる・退出する、または作成から 10 分たつと部屋は閉じる。
+- 卓が始まるのは、全員が在席していて (a) 3人そろったとき（自動。参加・待機のどちらの呼び出しでも）、または (b) 2人以上で作成者が Start を押したとき（空席は Bot）。始める直前に、別の卓に着席中の人と残高がバイインに足りない人を部屋から外す（作成者が外れたら部屋を閉じ、人数が足りなくなったら待つ）。
+- バイインは卓が始まるときに引き落とし、賞金・倍率・ストラクチャーは PLAY と同じ。`meta.room` に部屋番号を入れる（ビューにも出る）。
+- 部屋を作る・入るときは、別の卓に着席中なら 409 `in_game`（`game` 付き）、残高不足なら 409 `insufficient_chips`。キューに居れば抜ける。
+
+| op | body | 返り値 |
+|---|---|---|
+| `room_create` | `{ stake }` | `{ room: roomView, now }`。待機中の部屋の中で一意な番号を引く（衝突したら引き直し） |
+| `room_peek` | `{ code }` | `{ room: roomPeek \| null, now }` |
+| `room_join` | `{ code }` | `{ room, now }`（すでに居れば今の部屋。3人目なら卓が始まり `room.game` が入る）。`not_found`・`room_full`・`room_closed` |
+| `room_wait` | `{ room }` | `{ room, now }`。部屋に居なければ 404 `not_found` |
+| `room_start` | `{ room }` | `{ room, now }`。`not_host`・`not_enough`・`away`（409） |
+| `room_leave` | `{ room }` | `{ ok: true }` |
+
 ## 7. DB（`db/migrations/*.sql`、追加のみ）
 
 | 表 | 列 |
@@ -187,6 +212,7 @@ export function settle(state, meta)                  // 終局時：=> { payouts
 | `profiles` | uid（PK、neon_auth.user を参照）、nickname（1〜16、大文字小文字を無視して一意）、chips bigint default 10000、freeroll_day date、freeroll_used int、created_at |
 | `queue` | uid（PK）、stake text、since、seen_at |
 | `games` | id、players uuid[3]（Bot の席は null）、stake、multiplier、prize、status（'active'\|'over'）、state jsonb、ver、views jsonb（3要素の配列）、deadline_ms、bot_at_ms、winner、created_at、updated_at |
+| `rooms` | id、code（6 桁。status = 'waiting' の中で一意）、stake、host、members jsonb、status（'waiting'\|'started'\|'closed'）、game、created_at、updated_at（待機室の呼び出しごと。2 分呼ばれない部屋は次の room_create で閉じ、1 日で消す） |
 | `seasons` | id text（'2026-H2' など）、starts_at、ends_at、closed bool |
 | `hall_of_fame` | season、rank、nickname、chips（上位10人。記録のみ） |
 
@@ -200,7 +226,8 @@ Data API RPC（`authenticated` にのみ公開。表は直接触らせない）�
 
 ## 8. UI（`index.html` / `src/main.js` / `src/style.css`）
 
-- **メニュー**：PLAY / FREEROLL / RANKING の3つ。上部にアカウント（ニックネーム、チップ）を出す。未ログイン時は Google ログインと注意書きを出す。
+- **メニュー**：PLAY / PRIVATE / FREEROLL / RANKING の4つ。上部にアカウント（ニックネーム、チップ）を出す。未ログイン時は Google ログインと注意書きを出す。
+- **PRIVATE**：CREATE（ステークスを選ぶ → 待機室）と JOIN（6 桁の部屋番号 → 確認ダイアログ → 待機室）。待機室（`src/ui/room.js`）は部屋番号・招待 URL（Copy / 共有シート）・参加者（HOST・YOU・離席中は薄く）・残り時間・作成者の Start（2人以上・全員が在席）・退出（作成者は部屋を閉じる）。招待 URL `/?room=123456` は sessionStorage に預けてログインの往復をまたぎ、ログイン後に確認ダイアログを開く。待機中にリロードしたら同じ部屋の待機室に戻る。結果の「Play again」は PRIVATE のメニューへ戻る。
 - **PLAY**：ステークス（10 / 100 / 1,000）を選ぶ → 待機画面（待機人数、最大 15 秒のカウントダウン、キャンセル）→ ルーレット（倍率と賞金、約 6 秒、タップでスキップ）→ テーブル。
 - **テーブル**：3席（自分は下、相手は左上と右上）、コミュニティカード、ポット、ディーラーボタン、各席のスタックとベット、ブラインドレベルと次のレベルまでの時間、倍率と賞金の表示、ターンタイマー、Bot は 🤖 で表示。
 - **操作**：Fold / Check / Call / Raise。Raise はスライダーに加えて、プリフロップは 2x / 2.5x / 3x / All-in、ポストフロップは 1/3 / 1/2 / 2/3 / Pot / All-in のクイックボタン。
@@ -226,7 +253,7 @@ Data API RPC（`authenticated` にのみ公開。表は直接触らせない）�
 - **リタイア**（2026-10-04）: `forfeit(g, seat, now)` はその席のハンドを即 fold（手番なら通常の fold。すでに出したチップはデッドマネーとして他の席に残り、コールされなかった超過分は生きている席にだけ返す）、残りスタックを `g.forfeited` に移し、`seats[seat].out = true`・順位は「まだ空いている一番下」（3人生存なら3位、ヘッズアップなら2位）。生存者が1人になれば終局。UI はテーブルからメニューへ戻る導線を持たず（着席中に抜けられるのは Retire か決着のみ）、`me().game` がある（着席中の）ときはメニューを描かずに卓へ自動復帰する。
 - **server**
   - DB の `games.state` は `{ g, meta }`。Bot の persona は meta にだけ持ち、ビューには出さない。
-  - ビューの `meta` は `{ stake, buyIn, multiplier, prize, bot:[bool×3], clock, result, seat }`。
+  - ビューの `meta` は `{ stake, buyIn, multiplier, prize, room, bot:[bool×3], clock, result, seat }`。
   - `result` は `{ places, winner, payouts, after:[残高|null×3], ... }`。
   - `queue` の返り値に `now` を含める。
   - `profiles.played`: 今シーズンに1戦以上したか。ランキングの対象条件で、シーズンが変わると 0 に戻る。

@@ -27,6 +27,9 @@ export const clock = { offset: 0, now: () => Date.now() + clock.offset };
 
 export function localGet(k) { try { return localStorage.getItem(k) } catch (e) { return null } }
 export function localSet(k, v) { try { localStorage.setItem(k, v) } catch (e) { /* private mode */ } }
+// this tab only (survives the Google sign-in round trip and reloads). v = null removes
+export function sessGet(k) { try { return sessionStorage.getItem(k) } catch (e) { return null } }
+export function sessSet(k, v) { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v) } catch (e) { /* private mode */ } }
 
 // cards: 0..51, rank = c>>2 (0='2'), suit = c&3 (0♠ 1♥ 2♦ 3♣)
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'], SUITS = ['♠', '♥', '♦', '♣'];

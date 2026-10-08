@@ -1,8 +1,10 @@
 // Multiplier — entry point: boot, screen switching, account. Screens live in src/ui/*.
 import './ui/viewport.js';
 import * as realNet from './net.js';
-import { app, $, toast, closeAllDlg, localSet, REDUCE } from './ui/util.js';
+import { app, $, toast, closeAllDlg, localSet, sessGet, sessSet, REDUCE } from './ui/util.js';
 import { renderMenu, setPane, startQueue, cancelQueue, inQueue } from './ui/menu.js';
+import * as room from './ui/room.js';
+import { CODE_RE } from '../server/game/rooms.js';
 import * as table from './ui/table.js';
 import { playWheel } from './ui/wheel.js';
 import { openRules } from './ui/rules.js';
@@ -15,7 +17,7 @@ function showScreen(n) {
   if (n !== 'game') document.body.classList.remove('land');
 }
 function toMenu() {
-  table.leave(); closeAllDlg();
+  table.leave(); room.stop(); closeAllDlg();
   showScreen('menu'); setPane('main');
   if (app.user) refreshMe();
 }
@@ -24,7 +26,7 @@ async function enterGame(id, opts = {}) {
   if (entering) return;
   entering = true;
   try {
-    closeAllDlg();
+    room.stop(); closeAllDlg();
     if (opts.wheel) {
       try {
         const v = await table.peek(id);
@@ -34,8 +36,10 @@ async function enterGame(id, opts = {}) {
     table.enter(id);
   } finally { entering = false }
 }
-function playAgain(stake) {
-  table.leave(); closeAllDlg(); showScreen('menu'); startQueue(stake);
+// a private table goes back to the private menu (make or join another room); the others queue at the same stake again
+function playAgain(stake, priv) {
+  table.leave(); closeAllDlg(); showScreen('menu');
+  if (priv) { setPane('private'); if (app.user) refreshMe() } else startQueue(stake);
 }
 
 /* ---------- account ---------- */
@@ -46,6 +50,23 @@ async function refreshMe() {
   if (app.prof && app.prof.game && !table.active() && !inQueue() && !entering) { enterGame(app.prof.game, { wheel: false }); return app.prof }
   renderMenu();
   return app.prof;
+}
+
+/* ---------- invite URL (/?room=123456). Kept in sessionStorage across the Google sign-in round trip ---------- */
+const INVITE_KEY = 'mp-invite';
+function stashInvite() {
+  const u = new URL(location.href), code = u.searchParams.get('room');
+  if (code == null) return;
+  if (CODE_RE.test(code)) sessSet(INVITE_KEY, code);
+  u.searchParams.delete('room'); history.replaceState(null, '', u.pathname + u.search + u.hash);
+}
+// after sign-in, when not seated at a table: the invite opens the join dialog; else a lobby left by a reload is resumed
+function resumeRoom() {
+  if (!app.prof || app.prof.game || table.active() || entering) return;
+  const code = sessGet(INVITE_KEY); sessSet(INVITE_KEY, null);
+  if (code) return room.openJoin(code);
+  const id = room.savedLobby();
+  if (id) room.enter(id);
 }
 async function logout() {
   try { await app.net.signOut() } catch (e) { /* ignore */ }
@@ -70,12 +91,13 @@ async function boot() {
   app.booting = app.net.online;   // until the session check below has answered: the loader, not the sign-in screen
   showScreen('menu'); renderMenu();
   if (!app.net.online) return;
-  realNet.onSessionLost(() => { cancelQueue(); table.leave(); app.user = null; app.prof = null; showScreen('menu'); renderMenu(); toast('ログインし直してください') });
-  const u = new URL(location.href);
+  realNet.onSessionLost(() => { cancelQueue(); room.stop(); table.leave(); app.user = null; app.prof = null; showScreen('menu'); renderMenu(); toast('ログインし直してください') });
+  stashInvite();
   try { app.user = await app.net.currentUser() } catch (e) { app.user = null }
   app.booting = false;
   if (!app.user) return renderMenu();
   await refreshMe();   // (goes straight to the table when the player is still seated at one)
+  resumeRoom();
 }
 boot();
 // installable as an app (home screen). The worker caches nothing (public/sw.js)
