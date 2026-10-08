@@ -12,6 +12,9 @@
              ── Data API RPC (読み取り) ──────▶  Neon Postgres（RLS有効・RPC関数のみ公開）
              ── Function "game" (書き込み) ───▶  Neon Function server/game/index.js
 共有ロジック: src/engine.js（ルール）/ src/spin.js（設定・倍率）/ src/view.js（見せてよい情報）/ src/bot.js（Bot）
+              src/tview.js（卓のビューへの写し）/ src/pace.js（遷移・演出の間）/ src/fx.js・src/chat.js（演出 GIF・チャットの決まり）
+卓の画面: PrivateMatch（satsuki19980613/privatematch）から移した（src/ui/table.js・chat.js・player.js・ingame.js・stats.js・settings.js・gif.js・fxshow.js、
+          src/history/*。2026-10-08 さつき「プレイ画面を完全に移植」）
 開発専用: src/fakeNet.js（?fake でサーバー無しに全画面を確認。本物の server/game/rules.js と bot をブラウザで動かす）
 ```
 
@@ -117,12 +120,37 @@ export { RANKCH, SUITCH, cardStr }                        // 表記用
 - ハンドが終わったら `lastHand` を記録し、スタック 0 の席を脱落させる。同じハンドで2人が飛んだ場合は、ハンド開始時のスタックが多い方を上位にする（同じなら席番号の若い方）。生存者が1人になったら `over=true` と `winner` を立てる。そうでなければ次のハンドを自動で配る（その時点の `now` でレベルを決める）。
 - `rnd` は `newGame` の引数でのみ受け取り、状態にシードを持たせて続きを再現できるようにする（例：`g.seed` から xorshift で次の山札を作る）。テストで固定シードを使えるようにするため。
 
+### ハンドの記録（2026-10-08。卓の画面・ハンド履歴のため）
+- `g.actions`：今のハンドのアクション `[{ seat, kind, betTo, put, auto, street }]`（ブラインドは含めない）。kind は fold / check / call / bet / raise / allin
+  （最後のチップを入れたアクションは allin）。betTo はその街の自分の合計（fold / check は直面していた額）、put は足した額、auto は代打（時間切れ・リタイア）、street は 0〜3。
+- `g.sbSeat` / `g.bbSeat`、`g.runFrom`（動ける席が 1 人以下になって残りのボードを配り始めたときのボードの枚数）。
+- `g.lastHand` に足したもの：`startedAt, level, sb, bb, btn, sbSeat, bbSeat, start（開始スタック）, commits（拠出。返却前）, won（取り分。返却分を含むので net = won − commits）,
+  hole（全員の手札。viewFor が隠す）, folded, allIn, actions, runFrom（ショーダウンのとき。普通のショーダウンは 5、フォールドで終われば null）, eliminated: [{ seat, place }]`。
+- `g.prevHands`：lastHand の前の 4 ハンド（古い順）。短いスタックではブラインドだけでオールインになったハンドが同じ手で続けて終わるので、画面と記録が全部のハンドを拾えるように残す。
+
 ## 4. `src/view.js`
 
 ```js
-export function viewFor(g, seat)   // 削除するもの：deck、seed、他席の holes（null にする）。lastHand.shown はそのまま
+export function viewFor(g, seat)   // 削除するもの：deck、seed、他席の holes（null にする）。lastHand.shown はそのまま。
+                                   // lastHand.hole と prevHands[].hole は自分の札と公開された札だけ
 export function logText(entry, mySeat, names)  // '{n}' を自分なら 'YOU'、他なら名前に置換
 ```
+
+## 4.5 `src/tview.js` — 卓のビュー（2026-10-08）
+Multiplier のビュー（viewsOf）を、PrivateMatch から移した卓の画面・ペース・ハンド履歴が読む形（卓のビュー）に写す。純関数。
+```js
+export function tableViews(mv, settledNo)  // => { views, settledNo }。新しく終わったハンドごとに精算済みのビュー（ver − 0.5、2 つ以上なら 0.1 刻みで小さく）を
+                                            //    今のビューの前に挟む。終局なら最後は精算済みの最後のハンド（status 'finished'）。決着せずに終局した（リタイア・Bot だけ）なら hand = null
+export function liveView(mv) / settledView(mv, ver, lh) / settledHand(lh)
+export function legalOf(mv)                 // 卓の形の合法手 { canFold, canCheck, toCall, callPut, minTo, maxTo, aggression, pot, streetLastBetTo }
+export function toMove(move, legal)         // 卓の操作（allin を含む）→ エンジンの move（allin は最大額への raise、できなければ call）
+export function recordOf(lh)                // ハンド履歴の記録（PrivateMatch の handRecord の rec と同じ形）。サーバーが game_hands に保存する
+export const ptOf = (meta, place)           // その試合の収支（1 位は賞金 − buy-in、ほかは − buy-in）。STATS の「pt」
+```
+卓のビュー：`{ ver, seat, n: 3, names, status: 'running'|'finished', startedAt, levelMs, endedAt, winner, handNo, players: [{ stack, status: 'active'|'sitout'|'out', place, pt }],
+hand: { handNo, level（1 始まり）, sb, bb, ante: 0, btn, sbSeat, bbSeat, street, hole, board, startStacks, commits, streetBet, folded, allIn, toAct, streetLastBetTo, lastBetSize,
+actions, turnStart, deadline, phase: 'betting'|'settled', won, shown, names, pots, eliminated, runFrom, startedAt, endedAt }, legal, room: { code, kind: 'play'|'private'|'free' },
+config: { mode: ステークス, players: 3 }, fx, rematch, meta }`。sitout は strikes ≥ MAX_STRIKES。持ち時間のバーは人の手番だけ。
 
 ## 5. `src/bot.js` — Bot（Bot 担当。スタブから差し替える）
 
@@ -156,6 +184,17 @@ export function settle(state, meta)                  // 終局時：=> { payouts
   - ハンドが終わった直後は REVEAL_MS を、開始直後はルーレット演出の WHEEL_MS を、締め切りに足す。
   - strikes が MAX_STRIKES に達した席は sit-out になり、手番が来たら SITOUT_MS 後に代打で処理する（本人が行動すれば strikes は 0 に戻る）。
 
+### 卓の画面のための追加（2026-10-08）
+- **見せる時間**：ハンドが終わったら、次の手番の持ち時間は `revealMsOf(h, fx) = REVEAL_MS + runoutMs(h.runFrom) + (勝者の GIF があれば FX_MS)` の合計だけ遅れて始まる
+  （同じ手で終わった全部のハンドの分。`finishedHands(before, state)`）。`src/pace.js` の RUNOUT / FX は卓の演出と同じ値。
+- **離席**：`{ op:'sitout' }` は strikes を MAX_STRIKES に（手番中なら SITOUT_MS で代打）、`{ op:'sitin' }` は 0 に戻し、手番中なら持ち時間を戻す。どちらも ver + 1。
+- **演出 GIF**（PRIVATE の卓だけ）：`meta.fx = [slug|null ×3]`（部屋の作成・参加で送った値。Bot は null）。`{ op:'fx', fx }` で自分の分を変える（ほかの卓では何もしない）。
+  勝者の席は `src/fx.js` の `fxSeat`（ショーダウンで取り分がいちばん多い 1 人。チョップ・フォールドは無し）。
+- **再戦**（PRIVATE の卓だけ）：終局で `meta.rematch = { stay, gone, next, hostSeat, endedAt, closesAt（+10 分）}`。`{ op:'stay' }` / `{ op:'depart' }`。
+  始められるのは `rematchLeader`（作成者が残っているか、終局から 1 分以内でまだ去っていなければ作成者。そうでなければ最初に残った人）。`rematchSeats` が 2 人以上を確かめる。
+- **チャット**（PRIVATE の卓だけ）：`postChat(game, seat, text, lastAt, now)` → 正規化した文（`src/chat.js`）。`chat_closed` / `malformed` / `too_fast`（同じ席は 1 秒に 1 回）。
+- 終局後の meta だけの変更（stay / depart / fx / 再戦の開始）は払い戻しをしない（`commit` は払い戻しを 1 回だけ）。
+
 ### HTTP（`server/game/handler.js`。POST のみ、Bearer JWT 必須）
 | op | body | 返り値 |
 |---|---|---|
@@ -164,6 +203,11 @@ export function settle(state, meta)                  // 終局時：=> { payouts
 | `act` | `{ game, ver, move }` | `{ ver, now, view }` |
 | `retire` | `{ game }` | `{ ver, now, view }`。自分の席をリタイア（手番でなくても可。バイインは戻らず、賞金なし）。終局済みは 409 `game_over`、自席の順位が確定済みは 409 `already_out`、席が無ければ 404 `not_found` |
 | `tick` | `{ game }` | `{ ver, now, view }`（何も進まなければ 409 `not_yet`） |
+| `sitout` / `sitin` | `{ game }` | `{ ver, now, view }` |
+| `fx` | `{ game, fx }` | `{ ver, now, view }`（終局後も可） |
+| `stay` / `depart` | `{ game }` | `{ ver, now, view }`（PRIVATE の終局後。`room_closed`） |
+| `rematch` | `{ game }` | `{ game: 新しい卓, now }`（残った人の profiles をロックし、別の卓に着いている人・残高不足の人を除いて 2 人以上。buy-in を引く。`not_host`・`not_enough`・`room_closed`・`in_game`） |
+| `chat` | `{ game, text }` | `{ now, msg: { seq, seat, text, at } }`（ゲームの ver は変えない。`chat_closed`・`chat_full`（2000 件）409、`too_fast` 429） |
 
 **マッチング**（`queue` の中で、stake 単位の advisory lock を取る）：
 1. 参加資格を確認する。
@@ -213,27 +257,39 @@ export function roomPeek(room, uid, now)   // 参加前：{ code, stake, status,
 | `queue` | uid（PK）、stake text、since、seen_at |
 | `games` | id、players uuid[3]（Bot の席は null）、stake、multiplier、prize、status（'active'\|'over'）、state jsonb、ver、views jsonb（3要素の配列）、deadline_ms、bot_at_ms、winner、created_at、updated_at |
 | `rooms` | id、code（6 桁。status = 'waiting' の中で一意）、stake、host、members jsonb、status（'waiting'\|'started'\|'closed'）、game、created_at、updated_at（待機室の呼び出しごと。2 分呼ばれない部屋は次の room_create で閉じ、1 日で消す） |
+| `game_hands` | game（games を参照、一緒に消える）、hand_no、rec jsonb（公開してよい記録）、holes jsonb（全員の手札。RPC は本人の分だけ） |
+| `game_chat` | game（同上）、seq、seat、text、created_at。`games.chat_seq` が最新の seq |
 | `seasons` | id text（'2026-H2' など）、starts_at、ends_at、closed bool |
 | `hall_of_fame` | season、rank、nickname、chips（上位10人。記録のみ） |
 
 Data API RPC（`authenticated` にのみ公開。表は直接触らせない）：
 - `me()` → `{ nickname, chips, freeroll: { used, left, eligible }, game, season: { id, endsAt } }`。初回呼び出しでプロフィールを作る。古いゲームの削除と `season_rollover()` も行う。
 - `set_nickname(p_name)` → `{ nickname }`
-- `game_poll(p_game, p_ver)` → `{ ver, now, view|null }`
+- `game_poll(p_game, p_ver)` → `{ ver, now, view|null, chat }`（chat = 最新の発言の seq）
+- `game_hands(p_game, p_after)` → `[rec + { hole（自分の手札）}]`（hand_no > p_after を古い順に 200 件まで）
+- `game_chat(p_game, p_after)` → `[{ seq, seat, text, at }]`（新しい方から 200 件を古い順。PRIVATE でなければ []）
+- `me()` には `recent: [{ id }]`（3 日以内に打った卓。端末への同期用）も入る
+- マイグレーションの後は Data API のスキーマを読み直す（`scripts/db.mjs` が毎回 `neonctl data-api refresh-schema` を実行する）
 - `ranking()` → `{ season, top: [{ rank, nickname, chips, me }], me }`（上位100人。チップの多い順）
 - `hall_of_fame()` → `[{ season, top: [{ rank, nickname, chips }] }]`
 - `season_rollover()`（内部用）：ends_at を過ぎていたら、上位10人を hall_of_fame に記録する。次に全員の chips を 10000 に戻し、freeroll の回数を 0 に戻す。最後に次のシーズンを作る。advisory lock で1回だけ実行する。
 
 ## 8. UI（`index.html` / `src/main.js` / `src/style.css`）
 
-- **メニュー**：PLAY / PRIVATE / FREEROLL / RANKING の4つ。上部にアカウント（ニックネーム、チップ）を出す。未ログイン時は Google ログインと注意書きを出す。
+- **メニュー**：PLAY / PRIVATE / FREEROLL / RANKING / STATS の5つ。ヘッダの歯車で設定（ベットサイズ・演出 GIF）。上部にアカウント（ニックネーム、チップ）を出す。未ログイン時は Google ログインと注意書きを出す。
 - **PRIVATE**：CREATE（ステークスを選ぶ → 待機室）と JOIN（6 桁の部屋番号 → 確認ダイアログ → 待機室）。待機室（`src/ui/room.js`）は部屋番号・招待 URL（Copy / 共有シート）・参加者（HOST・YOU・離席中は薄く）・残り時間・作成者の Start（2人以上・全員が在席）・退出（作成者は部屋を閉じる）。招待 URL `/?room=123456` は sessionStorage に預けてログインの往復をまたぎ、ログイン後に確認ダイアログを開く。待機中にリロードしたら同じ部屋の待機室に戻る。結果の「Play again」は PRIVATE のメニューへ戻る。
 - **PLAY**：ステークス（10 / 100 / 1,000）を選ぶ → 待機画面（待機人数、最大 15 秒のカウントダウン、キャンセル）→ ルーレット（倍率と賞金、約 6 秒、タップでスキップ）→ テーブル。
-- **テーブル**：3席（自分は下、相手は左上と右上）、コミュニティカード、ポット、ディーラーボタン、各席のスタックとベット、ブラインドレベルと次のレベルまでの時間、倍率と賞金の表示、ターンタイマー、Bot は 🤖 で表示。
-- **操作**：Fold / Check / Call / Raise。Raise はスライダーに加えて、プリフロップは 2x / 2.5x / 3x / All-in、ポストフロップは 1/3 / 1/2 / 2/3 / Pot / All-in のクイックボタン。
-- **結果**：順位、獲得チップ、残高。「もう一度」で同じステークスの待機に入る。
+- **テーブル**（PrivateMatch の卓。仕様の詳細は PrivateMatch の docs/ARCHITECTURE.md §8 と同じ）：3席の楕円（自分は下）、金額は BB（スタックを押すとチップ数）、
+  情報の行（ブラインドとレベル・NEXT・倍率と賞金）、Bot は「Bot」の印。遷移は `src/pace.js` の順に 1 拍ずつ見せる（action / street / win / showdown / deal）。
+  ショーダウンは勝率を出しながらランアウトし、PRIVATE の卓で勝者が GIF を選んでいれば中央に出す（`src/ui/fxshow.js`）。
+- **操作**：Fold / Check / Call / Bet・Raise（シート：Min と設定の候補・スライダー・All-in）、Check/Fold の予約、離席 / I'm back。
+  ヘッダは着席中 Retire、飛んだ後・終局後は Leave（確かめてからメニューへ）。チャット履歴（PRIVATE だけ）とこの試合のハンド履歴のボタン。
+- **プレイヤー**：席を押すと VPIP・PFR・生存ターン（そのステークスの終わった試合）とこの試合の分、相手ならメモと色の印。Bot はこの試合の分だけ。
+- **結果**：順位、収支（チップ）、全員の順位、残高。PRIVATE の終局後は「席に残る」→ ドックで REMATCH（始められる人に Rematch）。それ以外は Play again（PLAY は同じステークス、PRIVATE はメニューの PRIVATE）。
+- **STATS**：ステークスごとに試合数・平均順位・1位率・収支・平均倍率・直近の成績・HANDS・VPIP・PFR・生存ターン・順位分布・累計収支のグラフ、HAND HISTORY、EXPORT / IMPORT。
+  記録はこの端末の IndexedDB `multiplier`（`?fake` は `multiplier-fake`）。卓ではハンドが終わるたびに `game_hands` を差分で読み、起動時は `me().recent` で取りこぼしを埋める。
 - **RANKING**：今シーズン（残り日数）と殿堂入りのタブ。
-- **ルールのモーダル**：ストラクチャー、倍率と確率の表、フリーロールの条件。
+- **ルールのモーダル**：ストラクチャー、倍率と確率の表、フリーロールの条件、卓の操作（Table）、PRIVATE（チャット・GIF・再戦）。
 - **フッター**：常に注意書きを表示し、利用規約・プライバシーポリシーへのリンクを置く。初回は 18 歳以上であることの確認を求める。
 - grid-holdem のデザイン規約を引き継ぐ：直角、YOU #336B87、相手 #FE7A47、ライト／ダーク、ガラス質感、`fitTable` による実測フィット。
 
