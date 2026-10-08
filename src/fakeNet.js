@@ -68,20 +68,24 @@ function views(T=G){
 }
 const tableOf=id=>{const T=GAMES.get(id);if(!T)throw new MoveError('not_found');return T};
 
-// after the end of a private table the friends stay (FRIEND ms later); a friend who leads starts the rematch once I stay
+// after the end of a private table the friends stay (FRIEND ms later); a friend who leads starts the rematch once I stay.
+// (The friends are bots in meta here, so their steps are made directly instead of through applyRequest, which only takes people.)
+function friendStep(T,patch){const g=structuredClone(T.game.state);g.ver++;store(T.game,{state:g,clock:T.game.meta.clock,meta:patch},T.seat,T)}
 function friendsAfterEnd(T){
   const rm=T.game.meta.rematch;
   if(!rm||!rematchOpen(rm,Date.now())||Date.now()-T.endAt<FRIEND)return;
-  for(const s of T.friends)if(!rm.stay.includes(s)&&!rm.gone.includes(s)){store(T.game,applyRequest(T.game,s,{op:'stay'},Date.now()),T.seat,T);return}
+  for(const s of T.friends)if(!rm.stay.includes(s)&&!rm.gone.includes(s)){friendStep(T,{rematch:{...rm,stay:[...rm.stay,s]}});return}
   const lead=rematchLeader(T.game.meta.rematch,Date.now());
   if(lead!=null&&lead!==T.seat&&T.game.meta.rematch.stay.includes(T.seat)&&Date.now()-T.endAt>FRIEND*2)startRematch(T,lead);
 }
 function startRematch(T,by){
-  const seats=rematchSeats(T.game,by,Date.now()),m=T.game.meta;
+  const rm=T.game.meta.rematch,m=T.game.meta;
+  const seats=T.friends.includes(by)?(rematchOpen(rm,Date.now())?[...new Set([...rm.stay,by])]:[]):rematchSeats(T.game,by,Date.now());
+  if(seats.length<2)throw new MoveError('not_enough');
   if(seats.includes(T.seat))checkEntry({chips:me.chips,frUsedToday:0},m.stake);
   const friends=seats.filter(s=>s!==T.seat).map(s=>({uid:'f'+s,name:T.game.state.names[s],fx:m.fx?m.fx[s]:null,host:s===by}));
   const id=makeTable(m.stake,friends,m.room,{fx:m.fx?m.fx[T.seat]:null,host:by===T.seat},!seats.includes(T.seat));
-  store(T.game,rematchStarted(T.game,id),T.seat,T);
+  if(T.friends.includes(by))friendStep(T,{rematch:{...rm,next:{id}}});else store(T.game,rematchStarted(T.game,id),T.seat,T);
   return id;
 }
 const LINES=['nice hand','gg','👀','もう一回！','強すぎ','それはずるい','ナイス'];
@@ -100,6 +104,8 @@ function makeTable(stake,friends=[],room=null,mine={},away=false){
   const fseats=players.map((p,i)=>p.uid&&p.uid!=='me'?i:-1).filter(i=>i>=0);
   fseats.forEach((s,i)=>{players[s]={...players[s],bot:{persona:fp[i%fp.length]}}});
   const t=createTable({players,stake,now:Date.now(),rnd,room,forceMultiplier:MULT||null});
+  // the friends are bots under the hood, and createTable gives bots no GIF: put theirs back (a private table only)
+  if(t.meta.fx)fseats.forEach(s=>{t.meta.fx[s]=players[s].fx??null});
   if(!away){if(stake==='free'){fr.day=jstDay();fr.used=frUsed()+1}else me.chips-=buyInOf(stake)}
   G={id:crypto.randomUUID(),seat:players.findIndex(p=>p.uid==='me'),game:t,views:null,status:'active',friends:fseats,hands:[],chat:[],endAt:0};
   G.views=views();

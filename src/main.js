@@ -6,8 +6,14 @@ import { renderMenu, setPane, startQueue, cancelQueue, inQueue } from './ui/menu
 import * as room from './ui/room.js';
 import { CODE_RE } from '../server/game/rooms.js';
 import * as table from './ui/table.js';
+import * as stats from './ui/stats.js';
+import * as ingame from './ui/ingame.js';
 import { playWheel } from './ui/wheel.js';
 import { openRules } from './ui/rules.js';
+import { openSettings, onSizesChange } from './ui/settings.js';
+import { onFxChange } from './ui/gif.js';
+import { syncRecent } from './history/sync.js';
+import { useDemo } from './klipy.js';
 
 app.net = realNet; // replaced by src/fakeNet.js on http://localhost:<port>/?fake (development only)
 
@@ -17,7 +23,7 @@ function showScreen(n) {
   if (n !== 'game') document.body.classList.remove('land');
 }
 function toMenu() {
-  table.leave(); room.stop(); closeAllDlg();
+  ingame.closeAll(); table.leave(); room.stop(); closeAllDlg(); stats.invalidate();
   showScreen('menu'); setPane('main');
   if (app.user) refreshMe();
 }
@@ -26,7 +32,7 @@ async function enterGame(id, opts = {}) {
   if (entering) return;
   entering = true;
   try {
-    room.stop(); closeAllDlg();
+    ingame.closeAll(); table.leave(); room.stop(); closeAllDlg();
     if (opts.wheel) {
       try {
         const v = await table.peek(id);
@@ -43,9 +49,12 @@ function playAgain(stake, priv) {
 }
 
 /* ---------- account ---------- */
+let synced = false;
 async function refreshMe() {
   try { app.prof = await app.net.rpc('me') }
   catch (e) { if (e.code === 'not_authenticated') { app.user = null; app.prof = null } }
+  // the hand history: copy the tables of the last 3 days that this device has not fully copied yet (once per start)
+  if (!synced && app.prof && app.prof.recent) { synced = true; syncRecent(app.prof.recent).then(() => stats.invalidate()) }
   // still seated at a running table (e.g. after a reload): there is no way back to the menu except Retire or finishing, so go straight to the table
   if (app.prof && app.prof.game && !table.active() && !inQueue() && !entering) { enterGame(app.prof.game, { wheel: false }); return app.prof }
   renderMenu();
@@ -77,6 +86,11 @@ Object.assign(app.nav, { toMenu, enterGame, playAgain, refreshMe, logout });
 /* ---------- header / dialogs ---------- */
 $('#rulesBtn').addEventListener('click', openRules);
 $('#retireBtn').addEventListener('click', table.askRetire);
+$('#setBtn').addEventListener('click', openSettings);
+onSizesChange(table.sizesChanged);
+// the winner GIF changed: a private table that is open gets it at once (the server ignores the other tables)
+onFxChange(fx => { const id = table.activeId(); if (id) app.net.game({ op: 'fx', game: id, fx }).catch(() => {}) });
+ingame.init(); // chat history, hand history and the player modal
 $('#themeToggle').addEventListener('click', () => {
   const r = document.documentElement, cur = r.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'), next = cur === 'dark' ? 'light' : 'dark';
   r.dataset.theme = next; localSet('mp-theme', next);
@@ -87,7 +101,10 @@ document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e =
 
 /* ---------- boot ---------- */
 async function boot() {
-  if (import.meta.env.DEV && new URLSearchParams(location.search).has('fake')) { app.net = await import('./fakeNet.js') }
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('fake')) {
+    app.net = await import('./fakeNet.js');
+    useDemo((await import('./fxDemo.js')).demo);   // winner GIFs: the local samples instead of KLIPY
+  }
   app.booting = app.net.online;   // until the session check below has answered: the loader, not the sign-in screen
   showScreen('menu'); renderMenu();
   if (!app.net.online) return;

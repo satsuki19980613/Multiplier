@@ -25,6 +25,9 @@
       <button class="nbtn ingame retire" id="retireBtn" type="button">Retire</button>
     </nav>
     <div class="top-r">
+      <button class="hbtn ingame" id="chatLogBtn" type="button" aria-label="Chat" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="miter" aria-hidden="true"><path d="M3 4h18v12H9l-5 4v-4H3z"/></svg><i class="badge" hidden></i></button>
+      <button class="hbtn ingame" id="handLogBtn" type="button" aria-label="Hand history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 3h12l4 4v14H4z"/><path d="M8 10h8M8 14h8M8 18h5"/></svg></button>
+      <button class="hbtn" id="setBtn" type="button" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="miter" aria-hidden="true"><path d="M10.3 5L10.8 2.3L13.2 2.3L13.7 5L15.7 5.9L18.1 4.3L19.7 5.9L18.1 8.3L19 10.3L21.7 10.8L21.7 13.2L19 13.7L18.1 15.7L19.7 18.1L18.1 19.7L15.7 18.1L13.7 19L13.2 21.7L10.8 21.7L10.3 19L8.3 18.1L5.9 19.7L4.3 18.1L5.9 15.7L5 13.7L2.3 13.2L2.3 10.8L5 10.3L5.9 8.3L4.3 5.9L5.9 4.3L8.3 5.9Z"/><circle cx="12" cy="12" r="3"/></svg></button>
       <button class="sound-toggle" id="soundToggle" type="button" aria-label="サウンド" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 9.5v5h4l5 4v-13l-5 4z" fill="currentColor" stroke="none"/><g class="snd-waves"><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18.3 6.5a8 8 0 0 1 0 11"/></g><path class="snd-off" d="M16 9.5l5 5M21 9.5l-5 5"/></svg></button>
       <button class="theme-toggle" id="themeToggle" type="button" aria-label="表示テーマを切り替える"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg></button>
     </div>
@@ -40,11 +43,11 @@
         <div class="pot" id="pot"></div>
         <div class="boardc" id="boardC" aria-label="Community cards"></div>
       </div>
-      <div class="seat opp pos-l" id="seatL"></div>
-      <div class="seat opp pos-r" id="seatR"></div>
-      <div class="seat me pos-m" id="seatM"></div>
+      <div id="seats"></div>
       <div class="betm" id="betM"></div>
+      <button class="chat-btn" id="chatBtn" type="button" aria-label="Chat" aria-pressed="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="miter" aria-hidden="true"><path d="M3 4h18v12H9l-5 4v-4H3z"/><path d="M7.5 10h.01M12 10h.01M16.5 10h.01" stroke-width="2.6" stroke-linecap="square"/></svg></button>
     </div>
+    <div class="chat-bubbles" id="chatBubbles" aria-live="polite" hidden></div>
     <div class="dock" id="dock" aria-live="polite"></div>
   </main>
 
@@ -57,13 +60,17 @@
 <div class="wheel" id="wheel" hidden></div>
 <div class="toast" id="toast" role="status"></div>
 
-<dialog id="retireDlg" class="sm"><div class="dlg" id="retireBody"></div></dialog>
 <dialog id="joinDlg" class="sm"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="joinBody"></div></dialog>
 <dialog id="leaveDlg" class="sm"><div class="dlg" id="leaveBody"></div></dialog>
 <dialog id="overDlg"><div class="dlg" id="overBody"></div></dialog>
 <dialog id="rankDlg"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="rankBody"></div></dialog>
 <dialog id="profDlg" class="sm"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="profBody"></div></dialog>
 <dialog id="rulesDlg"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="rulesBody"></div></dialog>
+<dialog id="setDlg"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="setBody"></div></dialog>
+<dialog id="chatDlg" class="glass-dlg"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="chatBody"></div></dialog>
+<dialog id="handsDlg" class="glass-dlg"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="handsBody"></div></dialog>
+<dialog id="playerDlg" class="glass-dlg"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="playerBody"></div></dialog>
+<dialog id="handDlg"><button class="x" data-close type="button" aria-label="閉じる"></button><div class="dlg" id="handBody"></div></dialog>
 
 <script type="module" src="/src/main.js"></script>
 </body>
