@@ -211,3 +211,37 @@ test('two hands in one step (the next hand all-in from the blinds): both are sho
   // the views hide the other seat's cards of the earlier hand too (the fold in hand 1)
   assert.equal(mv.prevHands[0].hole[1], null);
 });
+
+test('a retire inside the deciding hand: won stays the chips taken from the table, and the retired seat keeps its place in the final view', () => {
+  // three-handed: seat to act retires preflop with the blinds in → the hand goes on, won never goes negative
+  let g = mk(3);
+  const r = actor(g.state);
+  g = (() => { const o = commit(g, applyRequest(g, r, { op: 'retire' }, T0 + 9000)); return { state: o.state, meta: o.meta }; })();
+  // heads-up now: the seat to act retires mid-hand → the game ends with that hand
+  while (!g.state.over) {
+    const a = actor(g.state), lh0 = g.state.lastHand;
+    g = (() => { const o = commit(g, applyRequest(g, a, { op: 'retire' }, T0 + 10000)); return { state: o.state, meta: o.meta }; })();
+    if (lh0 !== g.state.lastHand && !g.state.over) continue;
+  }
+  for (const h of [g.state.lastHand, ...(g.state.prevHands || [])].filter(Boolean)) {
+    assert.ok(h.won.every(x => x >= 0), 'won is never negative');
+    for (const s of h.retired) assert.ok(h.start[s] > 0);
+  }
+  for (let s = 0; s < 3; s++) {
+    const { views } = tableViews(mvOf(g, s), 0), last = views.at(-1);
+    assert.equal(last.status, 'finished');
+    last.players.forEach((p, i) => { assert.ok(p.place != null, `seat ${i} has a place`); assert.equal(p.status === 'out', p.place !== 1); });
+  }
+});
+
+test('a lastHand from the engine before the hand records (no start) is not drawn', () => {
+  const g = playOutTo(mk(5));
+  const mv = mvOf(g), old = { handNo: mv.lastHand.handNo, board: [], net: [0, 0, 0], busted: [], endedAt: 0 };
+  const { views } = tableViews({ ...mv, lastHand: old, prevHands: [] }, 0);
+  assert.equal(views.length, 1); assert.equal(views[0].hand, null);
+});
+function playOutTo(g) {
+  let n = 0, now = T0 + 9000;
+  while (!g.state.over && n++ < 5000) { const L = legalActions(g.state); g = step(g, actor(g.state), L.canCheck ? { type: 'check' } : { type: 'call' }, now += 1000); }
+  return g;
+}

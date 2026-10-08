@@ -101,6 +101,7 @@ export function createTable({players,stake,now,rnd,room=null,forceMultiplier=nul
     fx:room?players.map(p=>(p.bot?null:normalizeFx(p.fx??null))):null,
     hostSeat:room?Math.max(0,players.findIndex(p=>p.host)):null,
     rematch:null,
+    moveVer:state.ver,   // the last version that changed the play (applyRequest: an older move is stale; meta-only steps do not move it)
   };
   meta.clock=clockAt(state,meta,meta.clock,now+wheelMsFor(multiplier));
   return{state,meta};
@@ -156,7 +157,8 @@ function retire(game,seat,now){
   return{state:g,clock:same?game.meta.clock:afterMove(game,g,now,seat,'retire')};
 }
 
-// a step that only changes meta (seat state, GIF, rematch): the state gets a new version so that every seat's poll picks the views up
+// a step that only changes meta (seat state, GIF, rematch): the state gets a new version so that every seat's poll picks the views up.
+// A move made against the version before it is still taken (commit keeps meta.moveVer at the last version that changed the play, see applyRequest)
 function metaStep(game,patch){
   const g=clone(game.state);g.ver++;
   return{state:g,clock:patch.clock??game.meta.clock,meta:patch};
@@ -173,7 +175,7 @@ function seatState(game,seat,away,now){
   if(away===(strikes[seat]>=MAX_STRIKES))return metaStep(game,{clock:c});
   strikes[seat]=away?MAX_STRIKES:0;
   let deadline=c.deadline;
-  if(actor(game.state)===seat)deadline=away?Math.min(c.deadline??Infinity,now+SITOUT_MS):Math.max(c.turnStart+TURN_MS+c.timebank[seat],now+TURN_MS);
+  if(actor(game.state)===seat)deadline=away?Math.min(c.deadline??Infinity,Math.max(c.turnStart??now,now)+SITOUT_MS):Math.max(c.turnStart+TURN_MS+c.timebank[seat],now+TURN_MS);
   return metaStep(game,{clock:{...c,strikes,deadline}});
 }
 
@@ -225,10 +227,10 @@ export function rematchSeats(game,seat,now){
   if(stayers.length<2)throw new MoveError('not_enough');
   return stayers;
 }
-/** the rematch has started (its game id): stayers move there */
-export function rematchStarted(game,next){
+/** the rematch has started (its game id; seats = the seats that are in it): those seats move there */
+export function rematchStarted(game,next,seats){
   const rm=game.meta.rematch;
-  return metaStep(game,{rematch:{...rm,next:{id:next}}});
+  return metaStep(game,{rematch:{...rm,next:{id:next,seats:[...seats]}}});
 }
 
 /** A chat message on a private table. lastAt = the seat's previous message time (null if none). => normalised text. Throws MoveError
@@ -254,7 +256,8 @@ export function applyRequest(game,seat,req,now){
   if(!req||req.op!=='act')throw new MoveError('illegal');
   if(game.state.over)throw new MoveError('game_over');
   if(!Number.isInteger(seat)||seat<0||seat>2||game.meta.bots[seat])throw new MoveError('not_your_turn');
-  if(req.ver!==game.state.ver)throw new MoveError('stale');
+  // stale = the play changed since the version the move was made on (steps that only changed meta do not count)
+  if(!Number.isInteger(req.ver)||req.ver>game.state.ver||req.ver<(game.meta.moveVer??game.state.ver))throw new MoveError('stale');
   if(actor(game.state)!==seat)throw new MoveError('not_your_turn');
   const move=toEngineMove(req.move),g=clone(game.state);
   engineCall(()=>applyAction(g,seat,move,now));
@@ -327,6 +330,7 @@ export function finishBotsOnly(state){
 export function commit(game,step){
   const meta={...game.meta,...(step.meta||{}),clock:step.clock};
   let state=step.state;
+  if(!step.meta)meta.moveVer=state.ver;
   if(game.state.over&&step.meta)return{state,meta,payouts:null};   // after the end only meta changes (stay / leave / rematch / GIF): nothing is paid again
   if(!state.over&&![0,1,2].some(s=>humanAlive(state,meta,s))){
     state=finishBotsOnly(state);
@@ -337,7 +341,8 @@ export function commit(game,step){
   meta.result=s.result;
   // a private table can be played again by the people who stay (rematchLeader / rematchSeats)
   if(meta.room){
-    const endedAt=state.lastHand?.endedAt??step.clock.turnStart??0;
+    // the end: the last hand's end, unless the game ended inside a hand that did not finish (a retire, only bots left)
+    const lh=state.lastHand,endedAt=(lh&&lh.handNo===state.handNo?lh.endedAt:step.clock.turnStart)??lh?.endedAt??0;
     meta.rematch={stay:[],gone:[],next:null,hostSeat:meta.hostSeat??null,endedAt,closesAt:endedAt+REMATCH_MS};
   }
   return{state,meta,payouts:s.payouts};

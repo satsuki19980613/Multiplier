@@ -85,7 +85,7 @@ function startRematch(T,by){
   if(seats.includes(T.seat))checkEntry({chips:me.chips,frUsedToday:0},m.stake);
   const friends=seats.filter(s=>s!==T.seat).map(s=>({uid:'f'+s,name:T.game.state.names[s],fx:m.fx?m.fx[s]:null,host:s===by}));
   const id=makeTable(m.stake,friends,m.room,{fx:m.fx?m.fx[T.seat]:null,host:by===T.seat},!seats.includes(T.seat));
-  if(T.friends.includes(by))friendStep(T,{rematch:{...rm,next:{id}}});else store(T.game,rematchStarted(T.game,id),T.seat,T);
+  if(T.friends.includes(by))friendStep(T,{rematch:{...rm,next:{id,seats}}});else store(T.game,rematchStarted(T.game,id,seats),T.seat,T);
   return id;
 }
 const LINES=['nice hand','gg','👀','もう一回！','強すぎ','それはずるい','ナイス'];

@@ -251,7 +251,7 @@ export function makeDb(pool,deps={}){
       const fx=row.meta.fx||[];
       const id=await makeGame(c,{humans:ok.map(s=>({uid:row.players[s],name:P.get(row.players[s]).nickname,fx:fx[s]??null,host:s===seat})),
         stake:row.meta.stake,room:row.meta.room});
-      await save(c,row,seat,rematchStarted(game,id));
+      await save(c,row,seat,rematchStarted(game,id,ok));
       return{game:id,now:now()};
     }),
 

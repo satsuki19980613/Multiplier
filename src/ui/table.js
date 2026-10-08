@@ -185,7 +185,7 @@ document.addEventListener('visibilitychange', () => { if (T) pump(); });
 function apply(v, instant) {
   const t = T; if (!v || v.ver <= t.ver || v.lobby) return;
   // 再戦が始まった：席に残っていれば新しい卓へ
-  if (v.rematch && v.rematch.next && v.rematch.stay.includes(v.seat)) { closeOver(); toast('REMATCH'); app.nav.enterGame(v.rematch.next.id, { wheel: true }); return; }
+  if (v.rematch && v.rematch.next && (v.rematch.next.seats || v.rematch.stay).includes(v.seat)) { closeOver(); toast('REMATCH'); app.nav.enterGame(v.rematch.next.id, { wheel: true }); return; }
   const prev = t.v;
   t.v = v; t.ver = v.ver;
   const h = v.hand;
@@ -748,7 +748,7 @@ function renderDock() {
     html = `<span class="dk-title">${street}</span><span class="dots"><i></i><i></i><i></i></span>${h.phase === 'betting' && v.status === 'running' && p.status === 'active' ? '<button class="pre away-btn" data-act="sitout" type="button">離席</button>' : ''}`;
   } else if (v.status === 'finished' && rm && !rm.next && rm.stay.includes(me) && rematchLive(v)) {
     // 席に残った：再戦を始められる人は Rematch、ほかの人は待つ
-    const lead = rematchLeader(rm, v.endedAt, clock.now()), n = rm.stay.length;
+    const lead = rematchLeader(rm, clock.now()), n = rm.stay.length;
     html = `<span class="eyebrow">REMATCH</span><span class="dk-title rm-n"><b>${n}</b><small>/${v.n}</small></span>${lead === me
       ? `<button class="btn accent" data-act="rematch" type="button" style="flex:0 1 34%;min-width:92px;margin-left:auto"${n < 2 || t.rmBusy ? ' disabled' : ''}>Rematch<small>${n}人</small></button>`
       : '<span class="dots"><i></i><i></i><i></i></span>'}`;

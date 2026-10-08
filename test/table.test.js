@@ -92,11 +92,11 @@ test('rematch: a private table that ended opens it; the host leads (or the first
   assert.deepEqual(g.meta.rematch.gone, [1]);
   assert.equal(errCode(() => applyRequest(g, 1, { op: 'stay' }, end + 5000)), 'room_closed');
   // started: no more staying; the view points everybody to the new table
-  g = (() => { const o = commit(g, rematchStarted(g, 'g2')); return { state: o.state, meta: o.meta }; })();
-  assert.deepEqual(g.meta.rematch.next, { id: 'g2' });
+  g = (() => { const o = commit(g, rematchStarted(g, 'g2', [0, 2])); return { state: o.state, meta: o.meta }; })();
+  assert.deepEqual(g.meta.rematch.next, { id: 'g2', seats: [0, 2] });
   assert.equal(rematchOpen(g.meta.rematch, end + 6000), false);
   assert.equal(errCode(() => rematchSeats(g, 0, end + 6000)), 'room_closed');
-  assert.deepEqual(viewsOf(g.state, g.meta)[2].meta.rematch.next, { id: 'g2' });
+  assert.deepEqual(viewsOf(g.state, g.meta)[2].meta.rematch.next, { id: 'g2', seats: [0, 2] });
   // nothing is paid again by these steps
   const o = commit(g, applyRequest(g, 0, { op: 'fx', fx: 'z-1' }, end + 7000));
   assert.equal(o.payouts, null);
@@ -151,4 +151,38 @@ test('HTTP: the table ops are validated and routed; their errors have statuses',
   const rc = await req({ op: 'stay', game: GID.replace('aa', 'bb') });
   assert.equal(rc.status, 409); assert.deepEqual(await rc.json(), { error: 'room_closed' });
   for (const c of ['chat_closed', 'chat_full', 'not_host', 'not_enough', 'room_closed']) assert.equal(STATUS[c], 409, c);
+});
+
+test('steps that only change meta do not make the move of the seat to act stale', () => {
+  let g = mk({ room: '123456', fx: ['dance-1', null, null] });
+  const a = actor(g.state), b = (a + 1) % 3, v = g.state.ver;
+  g = run(g, b, { op: 'sitout' }, T0 + 9000);
+  g = run(g, b, { op: 'fx', fx: null }, T0 + 9100);
+  assert.ok(g.state.ver > v);
+  assert.equal(errCode(() => applyRequest(g, a, { op: 'act', ver: v, move: { type: 'call' } }, T0 + 9200)), null, 'the old version is still taken');
+  g = run(g, a, { op: 'act', ver: v, move: { type: 'call' } }, T0 + 9200);
+  // after a real move the old version is stale
+  const c = actor(g.state);
+  assert.equal(errCode(() => applyRequest(g, c, { op: 'act', ver: v, move: { type: 'fold' } }, T0 + 9300)), 'stale');
+  assert.equal(errCode(() => applyRequest(g, c, { op: 'act', ver: g.state.ver + 1, move: { type: 'fold' } }, T0 + 9300)), 'stale');
+});
+
+test('going away while the result is still shown keeps the turn until the reveal is over', () => {
+  let g = mk();
+  g = act(g, { type: 'fold' }, T0 + 9000); g = act(g, { type: 'fold' }, T0 + 9100);
+  const a = actor(g.state), ts = g.meta.clock.turnStart;
+  assert.ok(ts > T0 + 9200);
+  g = run(g, a, { op: 'sitout' }, T0 + 9200);
+  assert.equal(g.meta.clock.deadline, ts + SITOUT_MS);
+});
+
+test('a private table ended inside an unfinished hand times the rematch from the end, not from the hand before', () => {
+  let g = mk({ room: '123456' });
+  g = act(g, { type: 'fold' }, T0 + 9000); g = act(g, { type: 'fold' }, T0 + 9100);   // hand 1 finished
+  const end = T0 + 60_000;
+  g = run(g, 1, { op: 'retire' }, end - 1000);
+  g = run(g, actor(g.state) === 2 ? 0 : 2, { op: 'retire' }, end);
+  assert.ok(g.state.over);
+  if (g.state.lastHand.handNo !== g.state.handNo) assert.ok(g.meta.rematch.endedAt >= end - 1000);
+  assert.equal(g.meta.rematch.closesAt, g.meta.rematch.endedAt + REMATCH_MS);
 });

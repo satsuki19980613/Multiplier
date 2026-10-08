@@ -124,8 +124,8 @@ export { RANKCH, SUITCH, cardStr }                        // 表記用
 - `g.actions`：今のハンドのアクション `[{ seat, kind, betTo, put, auto, street }]`（ブラインドは含めない）。kind は fold / check / call / bet / raise / allin
   （最後のチップを入れたアクションは allin）。betTo はその街の自分の合計（fold / check は直面していた額）、put は足した額、auto は代打（時間切れ・リタイア）、street は 0〜3。
 - `g.sbSeat` / `g.bbSeat`、`g.runFrom`（動ける席が 1 人以下になって残りのボードを配り始めたときのボードの枚数）。
-- `g.lastHand` に足したもの：`startedAt, level, sb, bb, btn, sbSeat, bbSeat, start（開始スタック）, commits（拠出。返却前）, won（取り分。返却分を含むので net = won − commits）,
-  hole（全員の手札。viewFor が隠す）, folded, allIn, actions, runFrom（ショーダウンのとき。普通のショーダウンは 5、フォールドで終われば null）, eliminated: [{ seat, place }]`。
+- `g.lastHand` に足したもの：`startedAt, level, sb, bb, btn, sbSeat, bbSeat, start（開始スタック）, commits（拠出。返却前）, won（取り分。返却分を含むので net = won − commits。ハンド中にリタイアした席だけは net に没収したスタックも入る）,
+  hole（全員の手札。viewFor が隠す）, folded, allIn, actions, runFrom（ショーダウンのとき。普通のショーダウンは 5、フォールドで終われば null）, eliminated: [{ seat, place }], retired（このハンド中にリタイアした席）`。
 - `g.prevHands`：lastHand の前の 4 ハンド（古い順）。短いスタックではブラインドだけでオールインになったハンドが同じ手で続けて終わるので、画面と記録が全部のハンドを拾えるように残す。
 
 ## 4. `src/view.js`
@@ -188,9 +188,10 @@ export function settle(state, meta)                  // 終局時：=> { payouts
 - **見せる時間**：ハンドが終わったら、次の手番の持ち時間は `revealMsOf(h, fx) = REVEAL_MS + runoutMs(h.runFrom) + (勝者の GIF があれば FX_MS)` の合計だけ遅れて始まる
   （同じ手で終わった全部のハンドの分。`finishedHands(before, state)`）。`src/pace.js` の RUNOUT / FX は卓の演出と同じ値。
 - **離席**：`{ op:'sitout' }` は strikes を MAX_STRIKES に（手番中なら SITOUT_MS で代打）、`{ op:'sitin' }` は 0 に戻し、手番中なら持ち時間を戻す。どちらも ver + 1。
+- meta だけを変える手（離席・GIF・stay / depart・再戦の開始）も ver + 1 するが、`act` は `meta.moveVer`（最後にプレイが変わった ver。`commit` が持つ）以上の ver なら受け付ける（離席やチャットで手番の人の操作が stale にならない）。
 - **演出 GIF**（PRIVATE の卓だけ）：`meta.fx = [slug|null ×3]`（部屋の作成・参加で送った値。Bot は null）。`{ op:'fx', fx }` で自分の分を変える（ほかの卓では何もしない）。
   勝者の席は `src/fx.js` の `fxSeat`（ショーダウンで取り分がいちばん多い 1 人。チョップ・フォールドは無し）。
-- **再戦**（PRIVATE の卓だけ）：終局で `meta.rematch = { stay, gone, next, hostSeat, endedAt, closesAt（+10 分）}`。`{ op:'stay' }` / `{ op:'depart' }`。
+- **再戦**（PRIVATE の卓だけ）：終局で `meta.rematch = { stay, gone, next: null | { id, seats（新しい卓に着いた席）}, hostSeat, endedAt（最後のハンドの終わり。ハンドの途中で決着したらその時刻）, closesAt（+10 分）}`。`{ op:'stay' }` / `{ op:'depart' }`。
   始められるのは `rematchLeader`（作成者が残っているか、終局から 1 分以内でまだ去っていなければ作成者。そうでなければ最初に残った人）。`rematchSeats` が 2 人以上を確かめる。
 - **チャット**（PRIVATE の卓だけ）：`postChat(game, seat, text, lastAt, now)` → 正規化した文（`src/chat.js`）。`chat_closed` / `malformed` / `too_fast`（同じ席は 1 秒に 1 回）。
 - 終局後の meta だけの変更（stay / depart / fx / 再戦の開始）は払い戻しをしない（`commit` は払い戻しを 1 回だけ）。

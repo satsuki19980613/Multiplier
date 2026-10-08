@@ -87,12 +87,14 @@ export function liveView(mv) {
 }
 
 /** 精算済みのハンド lh（既定は lastHand）を見せる卓のビュー（ver はそのビューの ver）。スタックは精算した直後（次のハンドのブラインドの前）。
- *  席の状態はそのハンドの時点：配られていない席とこのハンドで飛んだ席は out（順位はもう決まっている） */
+ *  席の状態はそのハンドの時点：配られていない席と、このハンドで飛んだ・リタイアした席は out（順位はもう決まっている）。
+ *  そのあとのハンドで抜けた席だけ active に戻す（最後のハンドなら、今 out の席はみなこのハンドまでに抜けている） */
 export function settledView(mv, ver, lh = mv.lastHand) {
   const v = base(mv, ver);
   v.players = players(mv, lh.start.map((x, s) => x + lh.net[s]));
-  const gone = new Set((lh.eliminated || []).map(e => e.seat));
-  v.players.forEach((p, s) => { if (lh.start[s] <= 0 || gone.has(s)) p.status = 'out'; else if (p.status === 'out') { p.status = 'active'; p.place = null; p.pt = null; } });
+  const gone = new Set([...(lh.eliminated || []).map(e => e.seat), ...(lh.retired || [])]);
+  const revive = lh !== mv.lastHand;
+  v.players.forEach((p, s) => { if (lh.start[s] <= 0 || gone.has(s)) p.status = 'out'; else if (revive && p.status === 'out') { p.status = 'active'; p.place = null; p.pt = null; } });
   v.hand = settledHand(lh);
   if (lh !== mv.lastHand) { v.status = 'running'; v.endedAt = null; }
   return v;
@@ -106,9 +108,11 @@ export function settledView(mv, ver, lh = mv.lastHand) {
  *     （Bot だけが残った・リタイアで決着）なら、そのハンドは描かない（hand = null）
  */
 export function tableViews(mv, settledNo) {
-  const lh = mv.lastHand, views = [];
+  // start の無いハンドはこの形になる前のエンジンが精算したもの（描けないので無いものとして扱う）
+  const ok = x => x && Array.isArray(x.start);
+  const lh = ok(mv.lastHand) ? mv.lastHand : null, views = [];
   // 新しく終わったハンド（古い順）。ふつうは 1 つ。ブラインドだけでオールインになったハンドが同じ手で続けて終わると 2 つ以上
-  const fresh = [...(mv.prevHands || []), lh].filter(x => x && x.handNo > settledNo);
+  const fresh = [...(mv.prevHands || []), lh].filter(x => ok(x) && x.handNo > settledNo);
   const last = lh ? Math.max(settledNo, lh.handNo) : settledNo;
   // 終局：最後のハンドが終局の手なら、そのハンドの精算済みのビューが最後のビュー
   const endsWithLast = mv.over && lh && lh.handNo === mv.handNo;
