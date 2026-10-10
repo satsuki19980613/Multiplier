@@ -17,9 +17,10 @@ async function get(url,init={}){
   let json=null;try{json=JSON.parse(body)}catch{/* not json */}
   return{status:r.status,headers:r.headers,body,json};
 }
+// The step summary (a file) gets only the check names and results; what the servers answered (details) stays in the log.
 function summary(title){
-  const lines=[`### ${title}`,'',`${results.length-failed} / ${results.length} 件 OK`,'','| 確認 | 結果 | 詳細 |','|---|---|---|',
-    ...results.map(r=>`| ${r.name} | ${r.ok?'OK':'**NG**'} | ${String(r.detail).replace(/[\\|]/g,'\\$&').replace(/\n/g,' ').slice(0,200)} |`),''];
+  const lines=[`### ${title}`,'',`${results.length-failed} / ${results.length} 件 OK`,'','| 確認 | 結果 |','|---|---|',
+    ...results.map(r=>`| ${r.name} | ${r.ok?'OK':'**NG**'} |`),'','詳細はジョブのログにある。',''];
   console.log(lines.join('\n'));
   if(process.env.GITHUB_STEP_SUMMARY)appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
 }
