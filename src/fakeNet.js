@@ -16,6 +16,7 @@ import{ROOM_STAKES,genCode,newRoom,joinRoom,touchRoom,leaveRoom,startReady,roomV
 import{actor}from'./engine.js';
 import{botMove,PERSONAS}from'./bot.js';
 import{FREEROLL,seasonOf}from'./spin.js';
+import{secureRnd}from'./rnd.js';
 
 const q=new URLSearchParams(location.search);
 const WAIT=q.has('wait')?Math.max(0,+q.get('wait')||0):2000;
@@ -63,7 +64,7 @@ function views(){
 
 // friends: the other people of a private table ([{ uid, name }]); room: its code
 function makeTable(stake,friends=[],room=null){
-  const rnd=Math.random;
+  const rnd=secureRnd;
   const players=seatPlayers([{uid:'me',name:me.nickname},...friends],rnd,PERSONAS);
   const fp=shuffle(PERSONAS,rnd);
   const fseats=players.map((p,i)=>p.uid&&p.uid!=='me'?i:-1).filter(i=>i>=0);
@@ -151,8 +152,8 @@ export async function game(body){
     case'room_create':{
       if(!ROOM_STAKES.includes(body.stake))throw new MoveError('illegal');
       noRoomGame();checkEntry({chips:me.chips,frUsedToday:0},body.stake);
-      const now=Date.now(),names=shuffle(FRIENDS,Math.random);
-      R={...newRoom({id:crypto.randomUUID(),code:genCode(Math.random),stake:body.stake,uid:'me',name:me.nickname,now}),
+      const now=Date.now(),names=shuffle(FRIENDS,secureRnd);
+      R={...newRoom({id:crypto.randomUUID(),code:genCode(secureRnd),stake:body.stake,uid:'me',name:me.nickname,now}),
         due:[{at:now+FRIEND,uid:'f1',name:names[0]},{at:now+FRIEND*2,uid:'f2',name:names[1]}]};
       Q=null;return roomReply();
     }
@@ -189,7 +190,7 @@ export async function game(body){
       else if(body.op==='retire')step=applyRequest(cur,G.seat,{op:'retire'},Date.now());
       else{
         if(IDLE&&G.game.meta.bots[actor(cur.state)])throw new MoveError('not_yet');
-        step=tick(cur,Date.now(),{botMove,rnd:Math.random});
+        step=tick(cur,Date.now(),{botMove,rnd:secureRnd});
       }
       store(cur,step,G.seat);
       return reply();

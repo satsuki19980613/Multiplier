@@ -13,12 +13,11 @@ import{
   ROOM_STAKES,ROOM_SEATS,ROOM_MIN_START,ROOM_GONE_MS,ROOM_TTL_MS,genCode,newRoom,joinRoom,touchRoom,leaveRoom,startReady,roomView,roomPeek,
 }from'./rooms.js';
 import{botMove as defaultBotMove,PERSONAS}from'../../src/bot.js';
+import{secureRnd}from'../../src/rnd.js';
 
 const LOCK_TIMEOUT='5s';
 const FRESH='seen_at > now() - make_interval(secs => $1::float8 / 1000)';
 
-// a better random than Math.random for shuffling decks (53 bits)
-const secureRnd=()=>{const a=crypto.getRandomValues(new Uint32Array(2));return((a[0]>>>5)*67108864+(a[1]>>>6))/9007199254740992};
 
 async function tx(pool,fn){
   const c=await pool.connect();
