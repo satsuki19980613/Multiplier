@@ -94,7 +94,7 @@
 | [CI](https://github.com/satsuki19980613/Multiplier/actions/workflows/ci.yml) | テストとビルド。データベースを使う結合テスト（ブラウザから表を読めないこと・マッチング・対局・賞金・ランキング・シーズンの更新）も含む | コードを変えるたび |
 | [Live](https://github.com/satsuki19980613/Multiplier/actions/workflows/live.yml) | 本番：日本国外からの接続が断られ、その応答に保護ヘッダが付いているか。サーバーがトークン無し・偽のトークン・ほかのサイトからの通信を断るか。データベースの表を直接読めないか。開発用の環境：本物のデータベースで結合テスト | 毎週と、手動で |
 | [CodeQL](https://github.com/satsuki19980613/Multiplier/actions/workflows/codeql.yml) | GitHub 公式のコードスキャン（危ない書き方が無いか） | コードを変えるたびと毎週 |
-| [Mozilla HTTP Observatory](https://developer.mozilla.org/en-US/observatory/analyze?host=multiplier-poker.pages.dev) | 公開しているサイトの保護ヘッダ | リンク先でいつでも測り直せる |
+| [Mozilla HTTP Observatory](https://developer.mozilla.org/en-US/observatory/analyze?host=multiplier-poker.pages.dev) | 公開しているサイトの保護ヘッダ。**A+**（2026-10-10 に測定） | リンク先でいつでも測り直せる |
 
 ### 問題を見つけたら
 
