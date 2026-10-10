@@ -51,3 +51,16 @@ test('isBlockedCountry / blockedResponse helpers', async () => {
   assert.equal(isBlockedCountry(''), false);
   assert.equal(blockedResponse().status, 403);
 });
+
+test('the notice carries the security headers of public/_headers (Observatory sees it from outside Japan)', async () => {
+  const res = blockedResponse();
+  const csp = res.headers.get('Content-Security-Policy');
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.doesNotMatch(csp, /script-src/);
+  assert.equal(res.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.equal(res.headers.get('Strict-Transport-Security'), 'max-age=31536000');
+  assert.equal(res.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin');
+  assert.equal(res.headers.get('Cross-Origin-Opener-Policy'), 'same-origin');
+  assert.ok(res.headers.get('Permissions-Policy'));
+});

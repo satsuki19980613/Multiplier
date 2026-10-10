@@ -48,11 +48,13 @@ export function fromUpstream(res){
   const headers=new Headers();
   res.headers.forEach((v,k)=>{const key=k.toLowerCase();if(key==='set-cookie'||key.startsWith('access-control-')||key==='content-encoding'||key==='content-length')return;headers.set(k,v)});
   for(const c of res.headers.getSetCookie())headers.append('set-cookie',firstPartyCookie(c));
-  headers.set('cache-control','no-store');
+  headers.set('cache-control','no-store');headers.set('x-content-type-options','nosniff');
   return new Response(res.body,{status:res.status,statusText:res.statusText,headers});
 }
 
 export async function proxyAuth(req,upstream,path,fetcher=fetch){
   if(!isProxiedPath(path))return new Response('not found',{status:404});
-  return fromUpstream(await fetcher(await toUpstream(req,upstream,path)));
+  let res;try{res=await fetcher(await toUpstream(req,upstream,path))}
+  catch{return new Response(JSON.stringify({error:'auth_unreachable'}),{status:502,headers:{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'}})}
+  return fromUpstream(res);
 }
