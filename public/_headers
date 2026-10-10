@@ -1,9 +1,10 @@
 # Cloudflare Pages response headers. `npm run preview` uses the same values (vite.config.js).
 # style-src 'unsafe-inline': the UI sets per-element CSS variables in markup (deal/flip delays, progress, turn clock). Scripts stay 'self' only.
+# font-src: fonts are served from this site (src/fonts.css; nothing goes to Google Fonts).
 # connect-src: this site (/api/auth relay) + production Neon Data API + production Function "game".
 # If the Neon URLs change, update .env.production too.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://ep-wild-term-b3paj7ze.apirest.c-4.ap-southeast-1.aws.neon.tech https://br-autumn-bar-b33acvo1-game.compute.c-4.ap-southeast-1.aws.neon.tech; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://ep-wild-term-b3paj7ze.apirest.c-4.ap-southeast-1.aws.neon.tech https://br-autumn-bar-b33acvo1-game.compute.c-4.ap-southeast-1.aws.neon.tech; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Strict-Transport-Security: max-age=31536000

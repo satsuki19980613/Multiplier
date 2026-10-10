@@ -19,6 +19,8 @@
     "pg": "^8.23.0"
   },
   "devDependencies": {
+    "@fontsource/inter-tight": "^5.3.0",
+    "@fontsource/zen-kaku-gothic-new": "^5.3.0",
     "neonctl": "^6.2.3",
     "vite": "^8.3.1"
   },
