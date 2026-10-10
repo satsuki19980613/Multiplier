@@ -1,0 +1,62 @@
+# 本物のサーバーの確認。
+#   prod: 本番のサイト・Function "game"・Data API に、ログインせずに届くか（scripts/live-check.mjs。何も書き込まない）。
+#         GitHub の実行環境は日本国外にあるので、サイトは国内限定の案内（403）と保護ヘッダを返すのが正しい
+#   dev:  開発用の Neon ブランチ dev にマイグレーションを適用し、結合テスト（scripts/itest.mjs）を本物の Neon で走らせる。
+#         テスト用の利用者は最後に消える。シーズンの更新も試すので、dev の全員のチップが 10,000 に戻る（dev のデータだけ）
+# 起動：Actions → Live → Run workflow と、毎週月曜
+# 必要な設定：Secret NEON_API_KEY（無ければ dev は飛ばす）
+name: Live
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 0 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  prod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: 本番の通信確認
+        run: |
+          set -a; . ./.env.production; set +a
+          SITE=https://multiplier-poker.pages.dev DATA_URL="$VITE_NEON_DATA_API_URL" GAME_URL="$VITE_GAME_URL" node scripts/live-check.mjs
+
+  dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: live-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: 設定の確認
+        id: cfg
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          if [ -n "$NEON_API_KEY" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"
+          else echo "::warning::Secret NEON_API_KEY が無いので dev の確認を飛ばします"; echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+      - run: npm ci
+        if: steps.cfg.outputs.ready == 'true'
+      - name: マイグレーション（dev）
+        if: steps.cfg.outputs.ready == 'true'
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: timeout 180 npm run db:migrate -- --branch dev
+      - name: 本物の Neon で結合テスト（dev）
+        if: steps.cfg.outputs.ready == 'true'
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: timeout 600 node scripts/itest.mjs --branch dev
