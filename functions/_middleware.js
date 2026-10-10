@@ -33,16 +33,23 @@ p{margin:.5rem 0}
 </html>
 `;
 
+// public/_headers is not applied to responses a Function makes, so the notice carries the same protections itself.
+// Outside Japan this notice is what scanners such as Mozilla HTTP Observatory see. The page has no script, image or link;
+// only its own inline <style> is allowed.
+export const BLOCK_HEADERS = {
+  'Content-Type': 'text/html; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Strict-Transport-Security': 'max-age=31536000',
+  'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), payment=(), usb=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+};
+
 /** 403 response for non-JP visitors. */
 export function blockedResponse() {
-  return new Response(BLOCK_HTML, {
-    status: 403,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-    },
-  });
+  return new Response(BLOCK_HTML, { status: 403, headers: BLOCK_HEADERS });
 }
 
 export async function onRequest(context) {
