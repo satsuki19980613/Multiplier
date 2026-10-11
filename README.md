@@ -3,6 +3,7 @@
 [![CI](https://github.com/satsuki19980613/Multiplier/actions/workflows/ci.yml/badge.svg)](https://github.com/satsuki19980613/Multiplier/actions/workflows/ci.yml)
 [![Live](https://github.com/satsuki19980613/Multiplier/actions/workflows/live.yml/badge.svg)](https://github.com/satsuki19980613/Multiplier/actions/workflows/live.yml)
 [![CodeQL](https://github.com/satsuki19980613/Multiplier/actions/workflows/codeql.yml/badge.svg)](https://github.com/satsuki19980613/Multiplier/actions/workflows/codeql.yml)
+[![Secrets](https://github.com/satsuki19980613/Multiplier/actions/workflows/secrets.yml/badge.svg)](https://github.com/satsuki19980613/Multiplier/actions/workflows/secrets.yml)
 
 3 人制 No-Limit Hold'em のハイパーターボ SIT & GO。開始前に賞金の倍率を抽選し、1 位が総取りする。
 
@@ -104,6 +105,7 @@
 | [CI](https://github.com/satsuki19980613/Multiplier/actions/workflows/ci.yml) | テストとビルド。データベースを使う結合テスト（ブラウザからテーブルを読めないこと、個人情報の置換、マッチング、対局、賞金、ランキング、シーズン更新）を含む | コード変更時 |
 | [Live](https://github.com/satsuki19980613/Multiplier/actions/workflows/live.yml) | 本番：日本国外からの接続が拒否され、その応答にセキュリティヘッダーが付与されていること。サーバーがトークン無し・不正なトークン・他オリジンからのリクエストを拒否すること。テーブルを直接読めないこと。本番のデータベースに個人情報が残っていないこと。開発環境：実データベースでの結合テスト | 毎週・手動 |
 | [CodeQL](https://github.com/satsuki19980613/Multiplier/actions/workflows/codeql.yml) | GitHub CodeQL による静的解析 | コード変更時・毎週 |
+| [Secrets](https://github.com/satsuki19980613/Multiplier/actions/workflows/secrets.yml) | gitleaks による秘密情報（API キー・トークン・パスワード・秘密鍵など）の検査。全ブランチの全履歴が対象 | コード変更時・毎週 |
 | [Mozilla HTTP Observatory](https://developer.mozilla.org/en-US/observatory/analyze?host=multiplier-poker.pages.dev) | 公開サイトのセキュリティヘッダー。**A+**（2026-10-10 測定） | リンク先で随時再測定できる |
 
 ### 脆弱性の報告

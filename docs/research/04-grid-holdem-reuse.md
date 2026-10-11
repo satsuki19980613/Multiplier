@@ -1,6 +1,6 @@
 # 04. grid-holdem の解析と流用計画
 
-対象: `C:\Users\sa641.SATSUKIPC\OneDrive\ドキュメント\一時ツール\grid-holdem`（2026-10-04 に解析。`npm test` は45件すべて成功）
+対象: 手元の `grid-holdem`（`../grid-holdem`）（2026-10-04 に解析。`npm test` は45件すべて成功）
 
 ## 0. 最重要の前提
 - **grid-holdem は通常のホールデムではなく「Grid Poker」**。5×5盤面の行5本と列5本、計10ラインで勝負する**2人専用**のゲーム。
