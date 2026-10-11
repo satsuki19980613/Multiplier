@@ -42,7 +42,10 @@ create trigger auth_account_scrub before insert or update on neon_auth.account
 create trigger auth_session_scrub before insert or update on neon_auth.session
   for each row execute function public.auth_session_scrub();
 
--- the triggers do the replacing: touching every row is enough
-update neon_auth."user" set id = id;
-update neon_auth.account set id = id;
-update neon_auth.session set id = id;
+-- rows already there (the user trigger also puts in the email and the name)
+update neon_auth."user" set image = null
+  where email <> id::text || '@multiplier.invalid' or name <> 'Player' or image is not null;
+update neon_auth.account set "idToken" = null, "accessToken" = null, "refreshToken" = null
+  where "idToken" is not null or "accessToken" is not null or "refreshToken" is not null;
+update neon_auth.session set "ipAddress" = null, "userAgent" = null
+  where "ipAddress" is not null or "userAgent" is not null;
