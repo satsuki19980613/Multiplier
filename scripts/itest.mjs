@@ -9,7 +9,7 @@ import pg from'pg';
 import{makeDb}from'../server/game/db.js';
 import{botMove}from'../src/bot.js';
 import{legalActions}from'../src/engine.js';
-import{BOT_WAIT_MS}from'../server/game/rules.js';
+import{BOT_WAIT_MS,QUEUE_FRESH_MS}from'../server/game/rules.js';
 
 let pool;
 if(process.env.ITEST_DATABASE_URL)pool=new pg.Pool({connectionString:process.env.ITEST_DATABASE_URL,max:8});
@@ -131,14 +131,31 @@ try{
   ok(rk.top.every((t,i)=>i===0||rk.top[i-1].chips>=t.chips),'ranking sorted by chips');
 
   // ---- concurrent queueing: six players at the same time => two tables, nobody in two ----
-  await Promise.all(U.slice(0,6).map(u=>db.queue(u,'mid')));
-  const rs=await Promise.all(U.slice(0,6).map(u=>db.queue(u,'mid')));
-  const ids=new Set(rs.map(x=>x.game));
-  ok(!ids.has(null)&&ids.size>=2&&ids.size<=3,`six concurrent players all get a table (${ids.size} tables)`);
-  const act=(await pool.query("select players from public.games where status='active' and players && $1::uuid[]",[U])).rows.flatMap(x=>x.players.filter(Boolean));
-  ok(act.length===6&&new Set(act).size===6,'nobody sits at two tables');
-  const per=(await pool.query("select cardinality(array_remove(players,null))::int n from public.games where status='active' and players && $1::uuid[]",[U])).rows;
-  ok(per.every(x=>x.n>=2),'every table has at least two humans');
+  // 'busy' (lock timeout) means "call again", as the client does. Far from the database (e.g. GitHub's runners and the
+  // Singapore branch) the transactions are slow enough for six concurrent calls to time out on each other's locks.
+  const queueRetry=async u=>{for(let i=0;;i++){try{return await db.queue(u,'mid')}catch(e){if(e.code!=='busy'||i>=10)throw e}}};
+  await Promise.all(U.slice(0,6).map(queueRetry));
+  const t0=performance.now();
+  const rs=await Promise.all(U.slice(0,6).map(queueRetry));
+  const round=performance.now()-t0;
+  // the client keeps polling while it waits; far from the database a waiter's entry can go stale (QUEUE_FRESH_MS) before the
+  // other's call, so two may still be waiting after two rounds. Poll again until at most one is left.
+  const waiters=async()=>(await pool.query('select uid from public.queue where uid=any($1::uuid[])',[U])).rows.map(r=>r.uid);
+  for(let k=0,w=await waiters();w.length>1&&k<10;k++,w=await waiters())await Promise.all(w.map(queueRetry));
+  // Counted from the database, not from the replies: a player told "waiting" may be seated by a later call in the same round.
+  const seats=(await pool.query("select id,players from public.games where status='active' and players && $1::uuid[]",[U])).rows
+    .map(g=>({id:g.id,humans:g.players.filter(Boolean)}));
+  const act=seats.flatMap(g=>g.humans);
+  const waitingNow=(await pool.query('select count(*)::int n from public.queue where uid=any($1::uuid[])',[U])).rows[0].n;
+  ok(rs.every(x=>!x.game||seats.some(g=>g.id===x.game&&g.humans.length)),'every table a player was sent to exists');
+  ok(new Set(act).size===act.length,`nobody sits at two tables (${seats.map(g=>g.humans.length).join('+')} humans)`);
+  ok(act.length+waitingNow===6&&waitingNow<=1,`six concurrent players: ${act.length} seated, ${waitingNow} waiting`);
+  // Any two fresh waiters start a table, so when a round of calls takes less than QUEUE_FRESH_MS every table has two humans or more.
+  // Far from the database (Live from GitHub's runners) a round can take longer: waiters then go stale for each other and,
+  // after BOT_WAIT_MS, get tables with bots. That is the intended fallback, so the pairing is only checked when the round was fast.
+  if(round<QUEUE_FRESH_MS)ok(seats.every(g=>g.humans.length>=2)&&waitingNow===0,'every table has at least two humans');
+  else console.log(`--  pairing not checked: a round took ${(round/1000).toFixed(1)} s (over QUEUE_FRESH_MS)`);
+  await freshQueue();
   await closeGames();
   for(const u of U)await setChips(u,10000);
 

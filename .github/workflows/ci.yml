@@ -1,0 +1,40 @@
+# プルリクエストと push ごとに、単体テスト・DB の結合テスト（scripts/itest.mjs を手元の Postgres で）・ビルドを確かめる。
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mtest
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      ITEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/mtest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: テスト用の DB（Neon と同じロールと neon_auth のひな形）にマイグレーションを適用
+        run: |
+          psql -h localhost -U postgres -d mtest -v ON_ERROR_STOP=1 -c 'create role anonymous; create role authenticated; create schema neon_auth; create table neon_auth."user"(id uuid primary key, name text not null, email text not null unique, "emailVerified" boolean not null default false, image text, "createdAt" timestamptz not null default now(), "updatedAt" timestamptz not null default now());'
+          for f in db/migrations/*.sql; do psql -h localhost -U postgres -d mtest -v ON_ERROR_STOP=1 -q -f "$f"; done
+      - name: DB の結合テスト（マッチング・対局・賞金・ランキング・シーズンの更新）
+        run: node scripts/itest.mjs
+      - run: npm run build

@@ -20,6 +20,7 @@ import{DEMO_SLUGS}from'./fxDemo.js';
 import{actor}from'./engine.js';
 import{botMove,PERSONAS}from'./bot.js';
 import{FREEROLL,seasonOf}from'./spin.js';
+import{secureRnd}from'./rnd.js';
 
 const q=new URLSearchParams(location.search);
 const WAIT=q.has('wait')?Math.max(0,+q.get('wait')||0):2000;
@@ -34,7 +35,7 @@ let G=null;   // the current table: { id, seat, game: { state, meta }, views, st
 const GAMES=new Map();   // every table of this page (id -> G): the history and an old table after a rematch stay readable
 let R=null;   // a private room: rooms.js room + { due: [{ at, uid, name }] } (friends still to come)
 
-const lag=v=>new Promise(r=>setTimeout(()=>r(structuredClone(v)),100+Math.random()*120));
+const lag=v=>new Promise(r=>setTimeout(()=>r(structuredClone(v)),100+secureRnd()*120));
 const jstDay=()=>new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
 const frUsed=()=>fr.day===jstDay()?fr.used:0;
 const season=()=>{const s=seasonOf(new Date());return{id:s.id,endsAt:+new Date(s.endsAt)}};
@@ -90,14 +91,14 @@ function startRematch(T,by){
 }
 const LINES=['nice hand','gg','👀','もう一回！','強すぎ','それはずるい','ナイス'];
 function friendChat(T){
-  if(!T.friends.length||Math.random()<0.4)return;
-  setTimeout(()=>{const s=T.friends[Math.floor(Math.random()*T.friends.length)];T.chat.push({seq:T.chat.length+1,seat:s,text:LINES[Math.floor(Math.random()*LINES.length)],at:Date.now()})},1200+Math.random()*1500);
+  if(!T.friends.length||secureRnd()<0.4)return;
+  setTimeout(()=>{const s=T.friends[Math.floor(secureRnd()*T.friends.length)];T.chat.push({seq:T.chat.length+1,seat:s,text:LINES[Math.floor(secureRnd()*LINES.length)],at:Date.now()})},1200+secureRnd()*1500);
 }
 
 // friends: the other people of a private table ([{ uid, name, fx?, host? }]); room: its code; mine: { fx, host } of my seat on a private table.
 // A friend without a GIF of their own gets one of the local samples 3 times in 4. away = I am not at the new table (a rematch without me: not used)
 function makeTable(stake,friends=[],room=null,mine={},away=false){
-  const rnd=Math.random;
+  const rnd=secureRnd;
   const players=seatPlayers([{uid:'me',name:me.nickname,fx:mine.fx??null,host:!!mine.host},
     ...friends.map(f=>({...f,fx:f.fx!==undefined?f.fx:rnd()<0.75?DEMO_SLUGS[Math.floor(rnd()*DEMO_SLUGS.length)]:null}))],rnd,PERSONAS);
   const fp=shuffle(PERSONAS,rnd);
@@ -200,8 +201,8 @@ export async function game(body){
     case'room_create':{
       if(!ROOM_STAKES.includes(body.stake))throw new MoveError('illegal');
       noRoomGame();checkEntry({chips:me.chips,frUsedToday:0},body.stake);
-      const now=Date.now(),names=shuffle(FRIENDS,Math.random);
-      R={...newRoom({id:crypto.randomUUID(),code:genCode(Math.random),stake:body.stake,uid:'me',name:me.nickname,now,fx:body.fx??null}),
+      const now=Date.now(),names=shuffle(FRIENDS,secureRnd);
+      R={...newRoom({id:crypto.randomUUID(),code:genCode(secureRnd),stake:body.stake,uid:'me',name:me.nickname,now,fx:body.fx??null}),
         due:[{at:now+FRIEND,uid:'f1',name:names[0]},{at:now+FRIEND*2,uid:'f2',name:names[1]}]};
       Q=null;return roomReply();
     }
@@ -237,7 +238,7 @@ export async function game(body){
       if(body.op==='act')step=applyRequest(cur,T.seat,{op:'act',ver:body.ver,move:body.move},Date.now());
       else if(body.op==='tick'){
         if(IDLE&&T.game.meta.bots[actor(cur.state)])throw new MoveError('not_yet');
-        step=tick(cur,Date.now(),{botMove,rnd:Math.random});
+        step=tick(cur,Date.now(),{botMove,rnd:secureRnd});
       }else step=applyRequest(cur,T.seat,{op:body.op},Date.now());
       store(cur,step,T.seat,T);
       return reply(T);
