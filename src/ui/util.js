@@ -6,7 +6,10 @@ export const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<':
 export const fmt = n => Math.round(Number(n) || 0).toLocaleString('en-US');
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const setHTML = (el, h) => { if (el._h !== h) { el.innerHTML = h; el._h = h; return true } return false };
-export const head = (eye, title, cls = '') => `<div class="eyebrow">${eye}</div><h2${cls ? ` class="${cls}"` : ''}>${title}</h2>`;
+export const head = (eye, title, cls = '') => {
+  const ca = cls ? ` class="${cls}"` : '';
+  return `<div class="eyebrow">${eye}</div><h2${ca}>${title}</h2>`;
+};
 export const STAKE_LABEL = { low: 'LOW', mid: 'MID', high: 'HIGH', ultra: 'ULTRA', extreme: 'EXTREME', free: 'FREEROLL' };
 
 // shared app state. net is set at boot (net.js or ?fake); nav.* are set by main.js
@@ -39,11 +42,16 @@ export function cardHTML(c, opts = {}) {
   const s = c & 3, r = c >> 2, red = s === 1 || s === 2;
   return `<div class="card${red ? ' red' : ''}${opts.dim ? ' dim' : ''}${opts.hit ? ' hit' : ''}" role="img" aria-label="${RANKS[r]} of ${SUIT_EN[s]}"><span class="rk">${RANKS[r]}</span><span class="st">${SUITS[s]}</span></div>`;
 }
-export const ordinal = n => n + (n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th');
+const SUFFIX = { 1: 'st', 2: 'nd', 3: 'rd' };
+export const ordinal = n => n + (SUFFIX[n] ?? 'th');
 
 // one chip label flying between two elements
-export function fly(fromEl, toEl, label, cls, delay = 0, done) {
-  if (REDUCE || !fromEl || !toEl || document.hidden) { done && done(); return }
+export function fly(fromEl, toEl, label, cls, delay, done) {
+  if (REDUCE || !fromEl || !toEl || document.hidden) {
+    done?.();
+    return;
+  }
+  const wait = delay ?? 0;
   const ra = fromEl.getBoundingClientRect(), rb = toEl.getBoundingClientRect();
   const el = document.createElement('div'); el.className = 'fly ' + cls; el.textContent = label; document.body.appendChild(el);
   const w = el.offsetWidth, h = el.offsetHeight, x0 = ra.left + ra.width / 2 - w / 2, y0 = ra.top + ra.height / 2 - h / 2,
@@ -52,8 +60,13 @@ export function fly(fromEl, toEl, label, cls, delay = 0, done) {
     { transform: `translate(${x0}px,${y0}px) scale(.8)`, opacity: 0 },
     { transform: `translate(${x0}px,${y0}px) scale(1)`, opacity: 1, offset: .15 },
     { transform: `translate(${x1}px,${y1}px) scale(1)`, opacity: 1, offset: .85 },
-    { transform: `translate(${x1}px,${y1}px) scale(.7)`, opacity: 0 }], { duration: D, delay, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'both' });
+    { transform: `translate(${x1}px,${y1}px) scale(.7)`, opacity: 0 }], { duration: D, delay: wait, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'both' });
   let ended = false;
-  const end = () => { if (ended) return; ended = true; el.remove(); if (toEl.animate) toEl.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 280, easing: 'ease-out' }); done && done() };
-  an.onfinish = end; setTimeout(end, D + delay + 150);
+  const end = () => {
+    if (ended) return;
+    ended = true; el.remove();
+    if (toEl.animate) toEl.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 280, easing: 'ease-out' });
+    done?.();
+  };
+  an.onfinish = end; setTimeout(end, D + wait + 150);
 }

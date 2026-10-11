@@ -3,7 +3,8 @@ import { BLINDS, STAKES, MULTIPLIERS, FREEROLL, START_CHIPS, structureFor } from
 import { $, fmt, head, openDlg, STAKE_LABEL } from './util.js';
 
 const TOTAL = 10_000_000;
-const pct = n => { const p = n / TOTAL * 100; return (p >= 1 ? p.toFixed(2).replace(/\.?0+$/, '') : p.toFixed(4).replace(/\.?0+$/, '')) + '%' };
+// toFixed, then trailing zeros (and a bare point) dropped: Number() round-trips the short decimal exactly
+const pct = n => { const p = n / TOTAL * 100; return String(Number(p.toFixed(p >= 1 ? 2 : 4))) + '%' };
 const oneIn = n => { const x = TOTAL / n; return '1/' + (x >= 100 ? Math.round(x).toLocaleString('en-US') : x.toFixed(1).replace(/\.0$/, '')) };
 const mins = ms => ms % 60000 === 0 ? `${ms / 60000} min` : `${ms / 1000} s`;
 
@@ -12,10 +13,11 @@ function multTable(stake) {
   const rows = MULTIPLIERS[stake].map(([m, n]) => `<tr><td>×${fmt(m)}</td><td>${fmt(m * buy)}</td><td>${pct(n)}</td><td>${oneIn(n)}</td></tr>`).join('');
   return `<table class="tbl"><thead><tr><th>Multiplier</th><th>Prize</th><th>Chance</th><th>Odds</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
+const STRUCT_LABEL = { 10: '×10 / ×25', 100: '×100+' };
 function structTable() {
-  const rows = [2, 3, 4, 5, 10, 25, 100].map(m => {
-    const s = structureFor(m), label = m === 10 ? '×10 / ×25' : m === 25 ? null : m === 100 ? '×100+' : '×' + m;
-    if (label === null) return '';
+  // ×25 shares the ×10 structure, so it is folded into the ×10 row
+  const rows = [2, 3, 4, 5, 10, 100].map(m => {
+    const s = structureFor(m), label = STRUCT_LABEL[m] ?? '×' + m;
     const bb = Math.round(s.stack / BLINDS[0][1]);
     return `<tr><td>${label}</td><td>${fmt(s.stack)}</td><td>${bb} BB</td><td>${mins(s.levelMs)}</td></tr>`;
   }).join('');

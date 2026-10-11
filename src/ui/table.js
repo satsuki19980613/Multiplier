@@ -2,7 +2,7 @@
 // State comes only from the server views (game_poll / act / tick); nothing here decides rules except legalActions(view).
 import { legalActions } from '../engine.js';
 import { BLINDS, STAKES } from '../spin.js';
-import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE, STAKE_LABEL } from './util.js';
+import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE } from './util.js';
 
 const GRACE_MS = 1500, REVEAL_MS = 3500, TURN_MS = 15000;
 const PLATE_MS = 2400, LOCK_MS = 350;
@@ -31,8 +31,8 @@ export function enter(id) {
   document.body.dataset.screen = 'game';
   syncRetire();
   refit();
-  poll();
-  T.tickTimer = setInterval(() => { maybeTick(); tickClock() }, 400);
+  void poll();
+  T.tickTimer = setInterval(() => { void maybeTick(); tickClock() }, 400);
 }
 export function leave() {
   if (!T) return;
@@ -50,7 +50,7 @@ export function resultOpen() { return !!T && T.resultShown }
 // The header's Retire button is the only way off the table while still seated: it shows until the player is out (retired, eliminated) or the game is over.
 function syncRetire() {
   const b = $('#retireBtn'); if (!b) return;
-  const v = T && T.v, out = v && (v.over || v.places[T.me] != null);
+  const v = T?.v, out = v && (v.over || v.places[T.me] != null);
   b.hidden = !T || !!out || T.retiring;
 }
 export function askRetire() {
@@ -72,7 +72,7 @@ export function askRetire() {
     } catch (err) {
       if (T !== t) return;
       t.retiring = false; syncRetire(); b.disabled = false;
-      if (['game_over', 'already_out', 'not_found'].includes(err.code)) { dlg.close(); t.retired = err.code === 'already_out'; poll() }   // the table moved on: just look at it again
+      if (['game_over', 'already_out', 'not_found'].includes(err.code)) { dlg.close(); t.retired = err.code === 'already_out'; void poll() }   // the table moved on: just look at it again
       else toast('通信エラー。もう一度');
     }
   };
@@ -85,8 +85,14 @@ function renderLoading() {
 }
 
 /* ===================== sync ===================== */
+const pollDelay = t => {
+  if (document.hidden) return 4000;
+  return t.v?.toAct === t.me && !t.rev ? 2500 : 1000;
+};
 async function poll() {
-  const t = T; if (!t || t.dead) return; clearTimeout(t.timer);
+  const t = T;
+  if (!t || t.dead) return;
+  clearTimeout(t.timer);
   try {
     const r = await net().rpc('game_poll', { p_game: t.game, p_ver: t.ver });
     if (t !== T) return;
@@ -97,17 +103,17 @@ async function poll() {
     if (e.code === 'not_found') { toast('卓が見つかりません'); return app.nav.toMenu() }
   }
   if (t !== T || t.dead) return;
-  maybeTick();
-  if (t.v && t.v.over && !t.rev) return;           // finished: no more polling
-  const mine = t.v && t.v.toAct === t.me && !t.rev;
-  t.timer = setTimeout(poll, document.hidden ? 4000 : mine ? 2500 : 1000);
+  void maybeTick();
+  if (t.v?.over && !t.rev) return;           // finished: no more polling
+  t.timer = setTimeout(poll, pollDelay(t));
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && T) poll() });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && T) void poll() });
 
-const isBot = s => !!(T && T.v && T.v.meta.bot && T.v.meta.bot[s]);
+const isBot = s => !!T?.v?.meta.bot?.[s];
+const botTag = s => isBot(s) ? '<span class="bot-tag">Bot</span>' : '';
 // advance the table when something is due: a bot past botAt, or someone past deadline + grace (the server decides; 409 not_yet is normal)
 async function maybeTick() {
-  const t = T, v = t && t.v; if (!v || v.over || t.tickBusy || t.busy || v.toAct == null) return;
+  const t = T, v = t?.v; if (!v || v.over || t.tickBusy || t.busy || v.toAct == null) return;
   const c = v.meta.clock; if (!c || Date.now() < t.tickAt) return;
   const now = clock.now(), a = v.toAct;
   const due = isBot(a) ? (c.botAt != null && now >= c.botAt) : (c.deadline != null && now > c.deadline + GRACE_MS);
@@ -140,27 +146,29 @@ function apply(v) {
   checkResult();
 }
 
+// what seat s did between two views of the same hand (null: nothing to show)
+function actionKind(prev, cur, s) {
+  if (cur.folded[s] && !prev.folded[s]) return 'fold';
+  const d = cur.total[s] - prev.total[s], toCall = Math.max(0, prev.currentBet - prev.bet[s]);
+  if (d <= 0) return toCall === 0 ? 'check' : null;
+  if (cur.allIn[s] && !prev.allIn[s]) return 'allin';
+  if (d <= toCall) return 'call';
+  return prev.currentBet === 0 ? 'bet' : 'raise';
+}
 function notePlates(prev, cur) {
   if (prev.handNo !== cur.handNo || prev.toAct == null) return;
-  const s = prev.toAct; let k = null;
-  if (cur.folded[s] && !prev.folded[s]) k = 'fold';
-  else {
-    const d = cur.total[s] - prev.total[s], toCall = Math.max(0, prev.currentBet - prev.bet[s]);
-    if (d > 0) k = cur.allIn[s] && !prev.allIn[s] ? 'allin' : d > toCall ? (prev.currentBet === 0 ? 'bet' : 'raise') : 'call';
-    else if (toCall === 0) k = 'check';
-  }
-  if (k) {
-    T.plates[s] = { k, t: Date.now() };
-    clearTimeout(T.platesTimer); T.platesTimer = setTimeout(() => { if (T) render() }, PLATE_MS + 60);
-  }
+  const s = prev.toAct, k = actionKind(prev, cur, s);
+  if (!k) return;
+  T.plates[s] = { k, t: Date.now() };
+  clearTimeout(T.platesTimer); T.platesTimer = setTimeout(() => { if (T) render() }, PLATE_MS + 60);
 }
 const plateOn = s => { const p = T.plates[s]; return p && Date.now() - p.t < PLATE_MS ? p : null };
 
 /* ---------- hand-end reveal ---------- */
-const revActive = () => !!(T && T.rev);
+const revActive = () => !!T?.rev;
 function startReveal(lh, prev) {
   const t = T, v = t.v;
-  const showdown = lh.shown.some(x => x);
+  const showdown = lh.shown.some(Boolean);
   const left = lh.endedAt != null ? lh.endedAt + REVEAL_MS - clock.now() : REVEAL_MS;
   const dur = Math.max(1600, Math.min(REVEAL_MS, left));
   const win = [0, 0, 0];
@@ -170,14 +178,22 @@ function startReveal(lh, prev) {
   // so a winner shows its hand-start stack instead and counts up to the final stack
   const pre = after.map((a, s) => { const p = Math.max(0, a - win[s]); return p === 0 && win[s] > 0 ? Math.max(0, a - lh.net[s]) : p });
   const winners = new Set(lh.pots.flatMap(p => p.winners));
-  const hole = (prev && prev.holes[t.me]) || null;
+  const hole = prev?.holes[t.me] || null;
   t.rev = { lh, until: Date.now() + dur, stage: 1, showdown, win, after, pre, winners, hole };
   t.tw = null;
   clearTimeout(t.revTimer);
   const at2 = showdown && !REDUCE ? 1000 : 250, at3 = Math.max(at2 + 200, dur - 850);
-  t.revTimer = setTimeout(() => { if (T !== t || !t.rev) return; t.rev.stage = 2; render();
-    t.revTimer = setTimeout(() => { if (T !== t || !t.rev) return; t.rev.stage = 3; payout();
-      t.revTimer = setTimeout(endReveal, Math.max(100, dur - at3)) }, at3 - at2) }, at2);
+  const stage3 = () => {
+    if (T !== t || !t.rev) return;
+    t.rev.stage = 3; payout();
+    t.revTimer = setTimeout(endReveal, Math.max(100, dur - at3));
+  };
+  const stage2 = () => {
+    if (T !== t || !t.rev) return;
+    t.rev.stage = 2; render();
+    t.revTimer = setTimeout(stage3, at3 - at2);
+  };
+  t.revTimer = setTimeout(stage2, at2);
   closeSheet();
 }
 function payout() {
@@ -214,22 +230,46 @@ function endReveal() {
 const placeOf = (v, s) => v.places[s] ?? (v.over && v.winner === s ? 1 : null);
 function checkResult() {
   const t = T, v = t.v; if (!v || t.rev) return;
-  if (v.over ? !t.overShown : (placeOf(v, t.me) != null && !t.resultShown)) showResult();
+  if (v.over ? !t.overShown : (placeOf(v, t.me) != null && !t.resultShown)) void showResult();
+}
+function resultRows(v, me) {
+  const order = [0, 1, 2].map(s => ({ s, p: placeOf(v, s) ?? 9 })).sort((a, b) => a.p - b.p);
+  return order.map(({ s, p }) => `<li class="${s === me ? 'me-row' : ''}"><span class="pn">${p < 9 ? p : '–'}</span><span class="nm2">${s === me ? '<span class="me">YOU</span> ' : ''}${botTag(s)}${esc(v.names[s])}</span><span class="pr">${p === 1 ? fmt(v.meta.prize) : ''}</span></li>`).join('');
+}
+function resultTitle(place, retired, over) {
+  if (place === 1) return 'Winner';
+  if (retired) return 'Retired';
+  return over ? 'Game over' : 'Eliminated';
+}
+function gainHTML(delta) {
+  let cls = 'even', sign = '±';
+  if (delta > 0) { cls = 'up'; sign = '+' } else if (delta < 0) { cls = 'down'; sign = '−' }
+  return `<div class="over-gain ${cls}">${sign}${fmt(Math.abs(delta))}<small>CHIPS</small></div>`;
+}
+// r: { v, place, retired, delta, rows }; bal: balance after the game (null: not known yet)
+function resultHTML(r, bal) {
+  const { v, place, retired } = r, done = v.over || retired;
+  const sup = place ? ordinal(place).slice(String(place).length) : '';
+  return `${head('RESULT', resultTitle(place, retired, v.over), place === 1 ? 'c' : '')}
+    <div class="over-hd"><span class="place${place === 1 ? ' p1' : ''}">${place ?? '–'}<sup>${sup}</sup></span></div>
+    ${gainHTML(r.delta)}
+    <ul class="over-rows">${r.rows}</ul>
+    <div class="over-bal"><span>BALANCE</span><b id="ovBal">${bal == null ? '…' : fmt(bal)}</b></div>
+    <div class="btns">${done ? '' : '<button class="btn ghost" data-act="watch" type="button">Watch</button>'}<button class="btn ghost" data-act="menu" type="button">Menu</button><button class="btn primary" data-act="again" type="button" id="againBtn" ${done ? '' : 'disabled'}>Play again</button></div>`;
+}
+function canPlayAgain(m, p) {
+  if (m.room) return true;
+  if (m.stake === 'free') return p.freeroll?.eligible;
+  return p.chips >= STAKES[m.stake].buyIn;
 }
 async function showResult() {
-  const t = T; t.resultShown = true; if (t.v.over) t.overShown = true;
+  const t = T;
+  t.resultShown = true;
+  if (t.v.over) t.overShown = true;
   const v = t.v, me = t.me, m = v.meta, place = placeOf(v, me), stake = m.stake, buy = m.buyIn || 0;
-  const gain = place === 1 ? m.prize : 0, delta = gain - buy;
-  const order = [0, 1, 2].map(s => ({ s, p: placeOf(v, s) ?? 9 })).sort((a, b) => a.p - b.p);
-  const rows = order.map(({ s, p }) => `<li class="${s === me ? 'me-row' : ''}"><span class="pn">${p < 9 ? p : '–'}</span><span class="nm2">${s === me ? '<span class="me">YOU</span> ' : ''}${isBot(s) ? '<span class="bot-tag">Bot</span>' : ''}${esc(v.names[s])}</span><span class="pr">${p === 1 ? fmt(m.prize) : ''}</span></li>`).join('');
+  const delta = (place === 1 ? m.prize : 0) - buy;
   const retired = !!t.retired && place !== 1;
-  const draw = bal => `${head('RESULT', place === 1 ? 'Winner' : retired ? 'Retired' : v.over ? 'Game over' : 'Eliminated', place === 1 ? 'c' : '')}
-    <div class="over-hd"><span class="place${place === 1 ? ' p1' : ''}">${place ?? '–'}<sup>${place ? ordinal(place).slice(String(place).length) : ''}</sup></span></div>
-    <div class="over-gain ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'even'}">${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${fmt(Math.abs(delta))}<small>CHIPS</small></div>
-    <ul class="over-rows">${rows}</ul>
-    <div class="over-bal"><span>BALANCE</span><b id="ovBal">${bal == null ? '…' : fmt(bal)}</b></div>
-    <div class="btns">${v.over || retired ? '' : '<button class="btn ghost" data-act="watch" type="button">Watch</button>'}<button class="btn ghost" data-act="menu" type="button">Menu</button><button class="btn primary" data-act="again" type="button" id="againBtn" ${v.over || retired ? '' : 'disabled'}>Play again</button></div>`;
-  $('#overBody').innerHTML = draw(m.result && m.result.after && m.result.after[me] != null ? m.result.after[me] : null);
+  $('#overBody').innerHTML = resultHTML({ v, place, retired, delta, rows: resultRows(v, me) }, m.result?.after?.[me] ?? null);
   const dlg = $('#overDlg'); if (!dlg.open) openDlg('#overDlg');
   $('#overBody').onclick = e => {
     const b = e.target.closest('[data-act]'); if (!b) return;
@@ -242,44 +282,55 @@ async function showResult() {
   if (T !== t || !p) return;
   const bal = $('#ovBal'); if (bal) bal.textContent = fmt(p.chips);
   if (v.over || retired) {
-    const ok = m.room ? true : stake === 'free' ? p.freeroll && p.freeroll.eligible : p.chips >= STAKES[stake].buyIn;
-    const b = $('#againBtn'); if (b) b.disabled = !ok;
+    const b = $('#againBtn'); if (b) b.disabled = !canPlayAgain(m, p);
   }
 }
 
 /* ===================== model ===================== */
-function model() {
-  const t = T, v = t.v, r = t.rev, lh = v.lastHand, me = t.me;
-  const M = { board: r ? lh.board : v.board, pot: r ? (r.stage >= 3 ? 0 : sum(lh.pots.map(p => p.amount))) : sum(v.total), seats: [] };
-  for (let s = 0; s < 3; s++) {
-    const busted = r && lh.busted.includes(s);
-    const out = v.seats[s].out && !(r && r.stage < 3 && busted);
-    let stack = v.seats[s].stack;
-    if (r) stack = r.stage >= 3 ? (t.tw ? t.tw.from[s] + (t.tw.to[s] - t.tw.from[s]) * t.tw.k : r.after[s]) : r.pre[s];
-    const inHand = r ? (!!lh.shown[s] || r.winners.has(s)) : !v.folded[s] && !v.seats[s].out;
-    const folded = r ? (!out && !inHand) : v.folded[s] && !v.seats[s].out;
-    let cards = null, up = false;   // cards: array of card ints, 'back' x2, or null
-    if (r) {
-      if (lh.shown[s]) { cards = lh.shown[s]; up = true }
-      else if (s === me && r.hole) cards = r.hole;
-      else cards = null;
-    } else if (!v.seats[s].out) {
-      if (s === me) cards = v.holes[s];
-      else if (!v.folded[s] && !v.over) cards = 'back';
-    }
-    M.seats[s] = {
-      s, out, folded, stack, up, cards, bet: r ? 0 : v.bet[s], allIn: !r && v.allIn[s] && !v.seats[s].out,
-      win: !!(r && r.stage >= 2 && r.winners.has(s)), place: v.places[s],
-      away: !!(v.meta.clock && v.meta.clock.strikes && v.meta.clock.strikes[s] >= 2 && !v.seats[s].out && !isBot(s)),
-    };
+function potOf(v, r) {
+  if (!r) return sum(v.total);
+  return r.stage >= 3 ? 0 : sum(v.lastHand.pots.map(p => p.amount));
+}
+// stack shown during a reveal: before the payout, then tweening to the final stack
+function revStack(t, r, s) {
+  if (r.stage < 3) return r.pre[s];
+  const w = t.tw;
+  return w ? w.from[s] + (w.to[s] - w.from[s]) * w.k : r.after[s];
+}
+// cards: array of card ints, 'back' x2, or null
+function seatCards(t, s) {
+  const v = t.v, r = t.rev, lh = v.lastHand;
+  if (r) {
+    if (lh.shown[s]) return { cards: lh.shown[s], up: true };
+    return { cards: s === t.me && r.hole ? r.hole : null, up: false };
   }
-  return M;
+  if (v.seats[s].out) return { cards: null, up: false };
+  if (s === t.me) return { cards: v.holes[s], up: false };
+  return { cards: !v.folded[s] && !v.over ? 'back' : null, up: false };
+}
+function seatModel(t, s) {
+  const v = t.v, r = t.rev, lh = v.lastHand, seat = v.seats[s];
+  const out = seat.out && !(r && r.stage < 3 && lh.busted.includes(s));
+  const stack = r ? revStack(t, r, s) : seat.stack;
+  const inHand = r ? (!!lh.shown[s] || r.winners.has(s)) : !v.folded[s] && !seat.out;
+  const folded = r ? (!out && !inHand) : v.folded[s] && !seat.out;
+  const { cards, up } = seatCards(t, s);
+  const strikes = v.meta.clock?.strikes;
+  return {
+    s, out, folded, stack, up, cards, bet: r ? 0 : v.bet[s], allIn: !r && v.allIn[s] && !seat.out,
+    win: !!(r && r.stage >= 2 && r.winners.has(s)), place: v.places[s],
+    away: !!(strikes?.[s] >= 2 && !seat.out && !isBot(s)),
+  };
+}
+function model() {
+  const t = T, v = t.v, r = t.rev;
+  return { board: r ? v.lastHand.board : v.board, pot: potOf(v, r), seats: [0, 1, 2].map(s => seatModel(t, s)) };
 }
 
 /* ===================== rendering ===================== */
 function render() {
-  const t = T; if (!t || !t.v) return;
-  const M = model(), v = t.v, me = t.me, L = (me + 1) % 3, R = (me + 2) % 3;
+  const t = T; if (!t?.v) return;
+  const M = model(), me = t.me, L = (me + 1) % 3, R = (me + 2) % 3;
   syncRetire();
   let ch = renderInfo();
   ch = setHTML($('#seatL'), seatHTML(L, M, false)) || ch;
@@ -297,9 +348,10 @@ function render() {
 function renderInfo() {
   const v = T.v, m = v.meta;
   const free = m.stake === 'free';
+  const mx = free ? '<span class="mx free">FREE</span>' : `<span class="mx">×${fmt(m.multiplier)}</span>`;
   return setHTML($('#tInfo'), `<div class="lv"><b>${fmt(v.sb)}/${fmt(v.bb)}</b><span>LV ${v.level + 1}</span></div>
     <div class="nx" id="nx"><span>NEXT</span><b id="nxv"></b></div>
-    <div class="pz">${free ? '<span class="mx free">FREE</span>' : `<span class="mx">×${fmt(m.multiplier)}</span>`}<b>${fmt(m.prize)}</b></div>`);
+    <div class="pz">${mx}<b>${fmt(m.prize)}</b></div>`);
 }
 function nextLevelText() {
   const v = T.v; if (v.level >= BLINDS.length - 1) return { t: 'MAX', soon: false };
@@ -310,9 +362,9 @@ function nextLevelText() {
 
 function clockBarHTML(s) {
   const v = T.v, c = v.meta.clock;
-  if (!c || c.deadline == null || v.over || T.rev) return '';
+  if (c?.deadline == null || v.over || T.rev) return '';
   const key = c.deadline + ':' + s + ':' + v.ver;
-  if (!T.clockCache || T.clockCache.key !== key) {
+  if (T.clockCache?.key !== key) {
     const total = Math.max(1, c.deadline - c.turnStart), left = Math.max(0, c.deadline - clock.now());
     T.clockCache = { key, html: `<div class="clock ${s === T.me ? 'me' : 'op'}" aria-hidden="true"><i style="--from:${Math.min(1, left / total).toFixed(4)};animation-duration:${left}ms"></i></div>` };
   }
@@ -320,6 +372,25 @@ function clockBarHTML(s) {
 }
 
 const PL = { fold: 'FOLD', check: 'CHECK', call: 'CALL', bet: 'BET', raise: 'RAISE', allin: 'ALL-IN' };
+function holeHTML(S, isMe) {
+  if (S.cards === 'back') return cardHTML(null) + cardHTML(null);
+  if (Array.isArray(S.cards)) return S.cards.map(c => cardHTML(c, { dim: S.folded && isMe })).join('');
+  return '';
+}
+const handName = (lh, s) => lh.names[s] ? `<span class="hn">${esc(lh.names[s])}</span>` : '';
+// note row: result > last action > status
+function seatNote(s, S, rv, acting, pl) {
+  const lh = T.v.lastHand, late = !!rv && rv.stage >= 2;
+  if (late && S.win) return `<span class="w up">+${fmt(Math.max(0, lh.net[s]))}</span>` + handName(lh, s);
+  if (late && lh.names[s] && !S.folded) return handName(lh, s);
+  if (S.out) return S.place ? ordinal(S.place).toUpperCase() : 'OUT';
+  if (pl && !rv) return `<span class="pl k-${pl.k}">${PL[pl.k]}</span>`;
+  if (S.folded) return 'FOLD';
+  if (S.allIn) return '<span class="ai">ALL-IN</span>';
+  if (S.away) return 'AWAY';
+  if (acting && isBot(s)) return '<span class="dots" style="margin:0"><i></i><i></i><i></i></span>';
+  return '';
+}
 function seatHTML(s, M, isMe) {
   const t = T, v = t.v, S = M.seats[s], rv = t.rev;
   const acting = !rv && !v.over && v.toAct === s;
@@ -327,21 +398,9 @@ function seatHTML(s, M, isMe) {
   const cls = ['sp', isMe ? 'me-s' : 'opp-s', acting ? 'act' : '', S.folded ? 'fold' : '', S.out ? 'out' : '', S.win ? 'win' : ''].filter(Boolean).join(' ');
   const bb = v.bb || 1;
   // hole cards float above the plate (the plate alone fixes the seat position, so the seat never moves when cards come and go)
-  let cards = '';
-  if (S.cards === 'back') cards = cardHTML(null) + cardHTML(null);
-  else if (Array.isArray(S.cards)) cards = S.cards.map(c => cardHTML(c, { dim: S.folded && isMe })).join('');
-  // note row: result > last action > status
-  let note = '';
-  const lh = v.lastHand;
-  if (rv && rv.stage >= 2 && S.win) note = `<span class="w up">+${fmt(Math.max(0, lh.net[s]))}</span>${lh.names[s] ? `<span class="hn">${esc(lh.names[s])}</span>` : ''}`;
-  else if (rv && rv.stage >= 2 && lh.names[s] && !S.folded) note = `<span class="hn">${esc(lh.names[s])}</span>`;
-  else if (S.out) note = S.place ? ordinal(S.place).toUpperCase() : 'OUT';
-  else if (pl && !rv) note = `<span class="pl k-${pl.k}">${PL[pl.k]}</span>`;
-  else if (S.folded) note = 'FOLD';
-  else if (S.allIn) note = '<span class="ai">ALL-IN</span>';
-  else if (S.away) note = 'AWAY';
-  else if (acting && isBot(s)) note = '<span class="dots" style="margin:0"><i></i><i></i><i></i></span>';
-  const name = isMe ? 'YOU' : (isBot(s) ? '<span class="bot-tag">Bot</span>' : '') + esc(v.names[s]);
+  const cards = holeHTML(S, isMe);
+  const note = seatNote(s, S, rv, acting, pl);
+  const name = isMe ? 'YOU' : botTag(s) + esc(v.names[s]);
   const dbtn = v.button === s && !S.out ? '<b class="dbtn" title="Dealer">D</b>' : '';
   const clk = acting && !isBot(s) ? clockBarHTML(s) : '';
   const bet = !isMe && S.bet > 0 ? `<div class="bchip"><i></i><b>${fmt(S.bet)}</b></div>` : '';
@@ -353,7 +412,7 @@ function seatHTML(s, M, isMe) {
 function afterRender(M) {
   const t = T, v = t.v, sh = t.sh, me = t.me;
   if (REDUCE) { sh.init = true; sh.handNo = v.handNo; sh.board = M.board.length; sh.up = M.seats.map(S => S.up); sh.bet = M.seats.map(S => S.bet); return }
-  const flip = (el, delay) => el && el.animate([{ transform: 'perspective(600px) rotateY(90deg)' }, { transform: 'none' }], { duration: 420, delay, easing: EASE, fill: 'backwards' });
+  const flip = (el, delay) => el?.animate([{ transform: 'perspective(600px) rotateY(90deg)' }, { transform: 'none' }], { duration: 420, delay, easing: EASE, fill: 'backwards' });
   // community cards
   const cards = [...document.querySelectorAll('#boardC .card')];
   if (sh.init && M.board.length > sh.board && sh.board >= 0) cards.slice(sh.board).forEach((c, i) => flip(c, i * 110));
@@ -379,12 +438,18 @@ function afterRender(M) {
 
 /* ---------- clock texts (every 400 ms) ---------- */
 function tickClock() {
-  const t = T; if (!t || !t.v) return;
-  const nx = $('#nxv'); if (nx) { const x = nextLevelText(); if (nx.textContent !== x.t) nx.textContent = x.t; $('#nx').classList.toggle('soon', x.soon) }
+  const t = T; if (!t?.v) return;
+  const nx = $('#nxv');
+  if (nx) {
+    const x = nextLevelText();
+    if (nx.textContent !== x.t) nx.textContent = x.t;
+    $('#nx').classList.toggle('soon', x.soon);
+  }
   const secs = $('#secs'), c = t.v.meta.clock;
-  if (secs && c && c.deadline != null) {
+  if (secs && c?.deadline != null) {
     const l = Math.max(0, c.deadline - clock.now()), s = String(Math.ceil(l / 1000));
-    if (secs.textContent !== s) secs.textContent = s; secs.classList.toggle('low', +s <= 5);
+    if (secs.textContent !== s) secs.textContent = s;
+    secs.classList.toggle('low', +s <= 5);
   }
   const lk = t.lockUntil - Date.now(), d = $('#dock');
   if (d.classList.contains('lock') && lk <= 0) { d.classList.remove('lock') }
@@ -397,49 +462,58 @@ function autoPre() {
   if (t.pre !== autoPreKey()) { t.pre = null; return }
   t.pre = null;
   const l = legalActions(v);
-  setTimeout(() => { if (T === t && t.v.ver === v.ver) submit({ type: l.canCheck ? 'check' : 'fold' }) }, 250);
+  setTimeout(() => { if (T === t && t.v.ver === v.ver) void submit({ type: l.canCheck ? 'check' : 'fold' }) }, 250);
+}
+// hand-end reveal: showdown, then who won
+function revDockHTML(rv, v, me) {
+  if (rv.stage < 2) return `<span class="dk-title">${rv.showdown ? 'SHOWDOWN' : '…'}</span><span class="dots"><i></i><i></i><i></i></span>`;
+  const lh = rv.lh, ws = [...rv.winners];
+  if (ws.length !== 1) return '<span class="dk-title ">SPLIT POT</span><span class="dk-stats"><b></b></span>';
+  const w = ws[0], who = w === me ? 'YOU WIN' : esc(v.names[w]) + ' WINS';
+  return `<span class="dk-title ${w === me ? 'y' : 'c'}">${who}</span><span class="dk-stats"><b>+${fmt(Math.max(0, lh.net[w]))}</b>${lh.names[w] ? esc(lh.names[w]) : ''}</span>`;
+}
+function overDockHTML(v, me) {
+  const pl = placeOf(v, me);
+  return `<span class="eyebrow">GAME OVER</span><span class="dk-title ${pl === 1 ? 'y' : ''}">${pl ? ordinal(pl) : ''}</span><button class="btn primary" data-act="result" type="button" style="flex:0 0 40%">Result</button>`;
+}
+function raiseBtnHTML(l, v) {
+  if (l.minRaiseTo == null) return '';
+  let label = v.currentBet === 0 ? 'Bet' : 'Raise', amt = fmt(l.minRaiseTo) + '+';
+  if (l.minRaiseTo === l.maxRaiseTo) { label = 'All-in'; amt = fmt(l.maxRaiseTo) }
+  return `<button class="btn accent" data-act="raise" type="button">${label}<small>${amt}</small></button>`;
+}
+// my turn: the action buttons
+function actDockHTML(l, v, me) {
+  const facing = l.canCall, rz = raiseBtnHTML(l, v);
+  const callStat = facing ? `CALL<b>${fmt(l.callAmount)}</b>` : '';
+  let row = `<button class="btn primary" data-act="check" type="button">Check</button>${rz}`;
+  if (facing) {
+    const allin = l.callAmount >= v.seats[me].stack ? ' · all-in' : '';
+    row = `<button class="btn ghost" data-act="fold" type="button">Fold</button><button class="btn primary" data-act="call" type="button">Call<small>${fmt(l.callAmount)}${allin}</small></button>${rz}`;
+  }
+  return `<div class="dk-top"><span class="you-act">YOUR TURN</span><span class="dk-stats">POT<b>${fmt(l.pot)}</b>${callStat}</span><span class="secs" id="secs"></span></div>
+      <div class="dk-row">${row}</div>`;
+}
+// someone else's turn (or I am out)
+function waitDockHTML(t, S) {
+  const v = t.v, me = t.me;
+  if (S.out) return `<span class="dk-title">${S.place ? ordinal(S.place) : 'OUT'}</span><span class="dots"><i></i><i></i><i></i></span><button class="btn primary" data-act="result" type="button" style="flex:0 0 40%">Result</button>`;
+  const inHand = !S.folded && !v.seats[me].out;
+  const a = v.toAct, who = a != null ? esc(v.names[a]) : '';
+  const pre = inHand && a != null && a !== me ? `<button class="pre" data-act="pre" type="button" aria-pressed="${t.pre === autoPreKey()}">Check/Fold</button>` : '';
+  return `${S.folded ? '<span class="eyebrow">FOLDED</span>' : ''}<span class="dk-title">${who}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>
+        ${pre}`;
 }
 function renderDock(M) {
   const t = T, v = t.v, me = t.me, dock = $('#dock'), el = $('#dockMain'), rv = t.rev;
-  const S = M.seats[me];
   const mine = !rv && !v.over && v.toAct === me;
   const l = mine ? legalActions(v) : null;
-  let html = '', idle = false;
-  if (rv) {
-    idle = true;
-    const lh = rv.lh, ws = [...rv.winners];
-    if (rv.stage < 2) html = `<span class="dk-title">${rv.showdown ? 'SHOWDOWN' : '…'}</span><span class="dots"><i></i><i></i><i></i></span>`;
-    else {
-      const w = ws.length === 1 ? ws[0] : null;
-      const who = w === null ? 'SPLIT POT' : w === me ? 'YOU WIN' : esc(v.names[w]) + ' WINS';
-      const amt = w === null ? '' : `+${fmt(Math.max(0, lh.net[w]))}`;
-      html = `<span class="dk-title ${w === me ? 'y' : w === null ? '' : 'c'}">${who}</span><span class="dk-stats"><b>${amt}</b>${w !== null && lh.names[w] ? esc(lh.names[w]) : ''}</span>`;
-    }
-  } else if (v.over) {
-    idle = true;
-    html = `<span class="eyebrow">GAME OVER</span><span class="dk-title ${placeOf(v, me) === 1 ? 'y' : ''}">${placeOf(v, me) ? ordinal(placeOf(v, me)) : ''}</span><button class="btn primary" data-act="result" type="button" style="flex:0 0 40%">Result</button>`;
-  } else if (l) {
-    const stackMe = v.seats[me].stack, facing = l.canCall, pot = l.pot;
-    const callAllin = facing && l.callAmount >= stackMe;
-    const canRaise = l.minRaiseTo != null;
-    const rLabel = v.currentBet === 0 ? 'Bet' : 'Raise', allinOnly = canRaise && l.minRaiseTo === l.maxRaiseTo;
-    const rz = canRaise ? `<button class="btn accent" data-act="raise" type="button">${allinOnly ? 'All-in' : rLabel}<small>${allinOnly ? fmt(l.maxRaiseTo) : fmt(l.minRaiseTo) + '+'}</small></button>` : '';
-    html = `<div class="dk-top"><span class="you-act">YOUR TURN</span><span class="dk-stats">POT<b>${fmt(pot)}</b>${facing ? `CALL<b>${fmt(l.callAmount)}</b>` : ''}</span><span class="secs" id="secs"></span></div>
-      <div class="dk-row">${facing
-        ? `<button class="btn ghost" data-act="fold" type="button">Fold</button><button class="btn primary" data-act="call" type="button">Call<small>${fmt(l.callAmount)}${callAllin ? ' · all-in' : ''}</small></button>${rz}`
-        : `<button class="btn primary" data-act="check" type="button">Check</button>${rz}`}</div>`;
-  } else {
-    idle = true;
-    const inHand = !S.folded && !S.out && !v.seats[me].out;
-    const a = v.toAct, who = a != null ? esc(v.names[a]) : '';
-    if (S.out) html = `<span class="dk-title">${S.place ? ordinal(S.place) : 'OUT'}</span><span class="dots"><i></i><i></i><i></i></span><button class="btn primary" data-act="result" type="button" style="flex:0 0 40%">Result</button>`;
-    else {
-      const armed = t.pre === autoPreKey();
-      html = `${S.folded ? '<span class="eyebrow">FOLDED</span>' : ''}<span class="dk-title">${who}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>
-        ${inHand && a != null && a !== me ? `<button class="pre" data-act="pre" type="button" aria-pressed="${armed}">Check/Fold</button>` : ''}`;
-    }
-  }
-  dock.classList.toggle('idle', idle);
+  let html;
+  if (rv) html = revDockHTML(rv, v, me);
+  else if (v.over) html = overDockHTML(v, me);
+  else if (l) html = actDockHTML(l, v, me);
+  else html = waitDockHTML(t, M.seats[me]);
+  dock.classList.toggle('idle', !l);
   const locked = mine && (Date.now() < t.lockUntil || t.busy);
   dock.classList.toggle('lock', locked);
   if (locked && Date.now() < t.lockUntil) { clearTimeout(t.lockT); t.lockT = setTimeout(() => { if (T === t) renderDock(model()) }, t.lockUntil - Date.now() + 20) }
@@ -447,7 +521,7 @@ function renderDock(M) {
 }
 
 $('#dock').addEventListener('click', e => {
-  const t = T; if (!t || !t.v) return;
+  const t = T; if (!t?.v) return;
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act, v = t.v;
   if (act === 'result') return showResult()
@@ -456,7 +530,7 @@ $('#dock').addEventListener('click', e => {
   if (act === 'fold' || act === 'check' || act === 'call') return submit({ type: act });
   if (act === 'raise') return openSheet();
   if (act === 'rs-close') return closeSheet();
-  if (act === 'rs-ok') { const to = t.rs && t.rs.to; closeSheet(); return submit({ type: 'raise', to }) }
+  if (act === 'rs-ok') { const to = t.rs?.to ?? null; closeSheet(); return submit({ type: 'raise', to }) }
 });
 async function submit(move) {
   const t = T; if (!t || t.busy) return;
@@ -468,7 +542,7 @@ async function submit(move) {
   } catch (e) {
     if (t !== T) return;
     t.busy = false;
-    if (['stale', 'not_your_turn', 'game_over'].includes(e.code)) poll();
+    if (['stale', 'not_your_turn', 'game_over'].includes(e.code)) void poll();
     else toast(e.code === 'illegal' ? 'その操作はできません' : '通信エラー。もう一度');
     renderDock(model());
   }
@@ -487,7 +561,7 @@ function quickValues(l, v) {
   return uniq;
 }
 function openSheet() {
-  const t = T, v = t.v, l = legalActions(v); if (!l || l.minRaiseTo == null) return;
+  const t = T, v = t.v, l = legalActions(v); if (l?.minRaiseTo == null) return;
   const lo = l.minRaiseTo, hi = l.maxRaiseTo, unit = Math.max(1, Math.round(v.bb / 2)), q = quickValues(l, v);
   const vals = [lo]; for (let x = (Math.floor(lo / unit) + 1) * unit; x < hi; x += unit) vals.push(x);
   for (const [, x] of q) if (!vals.includes(x)) vals.push(x);
@@ -508,25 +582,33 @@ function openSheet() {
   host.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { t.rs.to = +b.dataset.q; sync() });
   sync();
 }
-function closeSheet() { if (T) T.rs = null; const h = $('#rsheet'); if (h) h.remove() }
+function closeSheet() {
+  if (T) T.rs = null;
+  $('#rsheet')?.remove();
+}
 
 /* ===================== layout: the largest card size at which everything fits ===================== */
-const rectOf = e => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null };
+const rectOf = e => {
+  if (!e) return null;
+  const r = e.getBoundingClientRect();
+  return r.width > 0 ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null;
+};
 const hit = (a, b, m = 3) => a.l < b.r + m && b.l < a.r + m && a.t < b.b + m && b.t < a.b + m;
+const seatRects = id => [...$(id).children].filter(e => !e.classList.contains('bchip') && !e.classList.contains('dbtn')).map(rectOf).filter(Boolean);
+const outside = (g, T0) => g.l < T0.left - 1 || g.r > T0.right + 1 || g.t < T0.top - 1 || g.b > T0.bottom + 1;
+// any rect of one group hitting any rect of a later group
+const groupsOverlap = G => G.some((g, i) => G.slice(i + 1).some(h => g.some(a => h.some(b => hit(a, b)))));
 // everything must fit without overflow, and the table's parts (each seat's hole cards and plate, the pot and board, the hero's bet) must stay inside the table and not overlap
 function fits() {
   const st = $('#stage'), tb = $('#table');
   // (no stage scrollWidth check: flipping cards are transformed and would widen it for a moment)
   if (st.scrollHeight > st.clientHeight + 1 || $('#tInfo').scrollWidth > $('#tInfo').clientWidth + 1) return false;
   const T0 = tb.getBoundingClientRect();
-  const seat = id => [...$(id).children].filter(e => !e.classList.contains('bchip') && !e.classList.contains('dbtn')).map(rectOf).filter(Boolean);
-  const G = [seat('#seatL'), seat('#seatR'), seat('#seatM'), [rectOf($('#pot')), rectOf($('#boardC'))].filter(Boolean), [rectOf($('#betM .bchip'))].filter(Boolean)];
-  const all = G.flat();
-  for (const g of all) if (g.l < T0.left - 1 || g.r > T0.right + 1 || g.t < T0.top - 1 || g.b > T0.bottom + 1) return false;
+  const G = [seatRects('#seatL'), seatRects('#seatR'), seatRects('#seatM'), [rectOf($('#pot')), rectOf($('#boardC'))].filter(Boolean), [rectOf($('#betM .bchip'))].filter(Boolean)];
+  if (G.flat().some(g => outside(g, T0))) return false;
   const B = G[3].length ? { l: Math.min(...G[3].map(r => r.l)), r: Math.max(...G[3].map(r => r.r)) } : null;
   if (B && B.r - B.l > (T0.right - T0.left) * .8) return false;
-  for (let i = 0; i < G.length; i++) for (let j = i + 1; j < G.length; j++) for (const a of G[i]) for (const b of G[j]) if (hit(a, b)) return false;
-  return true;
+  return !groupsOverlap(G);
 }
 function largest(lo, hi, set) {
   set(lo); if (!fits()) return lo;
@@ -536,9 +618,10 @@ function largest(lo, hi, set) {
 }
 let fitKey = '';
 export function fitTable(force) {
-  const b = document.body; if (b.dataset.screen !== 'game' || !T || !T.v) return;
+  const b = document.body; if (b.dataset.screen !== 'game' || !T?.v) return;
   const app_ = $('.app'), st = $('#stage'), vw = app_.clientWidth, vh = app_.clientHeight, key = vw + 'x' + vh;
-  if (!force && key === fitKey) return; fitKey = key;
+  if (!force && key === fitKey) return;
+  fitKey = key;
   b.classList.add('measuring');
   b.classList.toggle('land', vw > vh * 1.25 && vh < 600);
   const c = largest(16, b.classList.contains('land') ? 52 : 84, x => st.style.setProperty('--cw', x + 'px'));
@@ -551,7 +634,7 @@ addEventListener('resize', refit);
 addEventListener('orientationchange', refit);
 if (window.ResizeObserver) new ResizeObserver(refit).observe(document.querySelector('.app'));
 if (window.visualViewport) visualViewport.addEventListener('resize', refit);
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit);
+void document.fonts?.ready?.then(refit);
 
 // development only: poke the running table from the console (npm run dev)
 if (import.meta.env.DEV) window.__table = { get T() { return T }, showResult, render };
