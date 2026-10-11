@@ -30,7 +30,7 @@ export function drawMultiplier(stake, rnd = Math.random) {
   const table = MULTIPLIERS[stake];
   if (!table) throw new Error('unknown stake: ' + stake);
   let k = Math.floor(rnd() * MULT_TOTAL);
-  if (!(k >= 0)) k = 0;
+  if (Number.isNaN(k) || k < 0) k = 0;
   if (k >= MULT_TOTAL) k = MULT_TOTAL - 1;
   for (const [m, c] of table) {
     if (k < c) return m;

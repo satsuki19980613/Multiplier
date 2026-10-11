@@ -2,6 +2,7 @@
 import { STAKES, FREEROLL, MULTIPLIERS } from '../spin.js';
 import { $, app, esc, fmt, head, openDlg, toast, localGet, localSet, STAKE_LABEL } from './util.js';
 import * as room from './room.js';
+import { secureRnd } from '../rnd.js';
 import * as stats from './stats.js';
 import { getFx } from './gif.js';
 
@@ -56,12 +57,12 @@ function bindLogin(el) {
 }
 
 function seasonLeft() {
-  const s = app.prof && app.prof.season; if (!s || !s.endsAt) return '';
+  const s = app.prof?.season; if (!s?.endsAt) return '';
   const d = Math.ceil((new Date(s.endsAt).getTime() - Date.now()) / 86400000);
   return d > 0 ? `${d} DAYS LEFT` : 'LAST DAY';
 }
 function freeState() {
-  const f = (app.prof && app.prof.freeroll) || { used: 0, left: 0, eligible: false };
+  const f = app.prof?.freeroll || { used: 0, left: 0, eligible: false };
   const chips = app.prof ? app.prof.chips : 0;
   let why = '';
   if (chips >= FREEROLL.eligibleBelow) why = `残高が ${FREEROLL.eligibleBelow} 未満のときだけ`;
@@ -93,9 +94,10 @@ function stakeRows() {
   return Object.entries(STAKES).map(([k, s]) => {
     const maxM = MULTIPLIERS[k][0][0];
     const why = chips < s.buyIn ? `残高 ${fmt(s.buyIn)} 以上で参加` : '';
+    const sub = why || `最大 ${fmt(s.buyIn * maxM)}`;
     return `<button class="mbtn stk-row${s.buyIn >= 1000 ? ' hi' : ''}" data-k="${k}" type="button" ${why ? 'disabled' : ''}>
       <span class="nm3"><b>${STAKE_LABEL[k]}</b></span>
-      <span style="text-align:right"><span class="buy">${fmt(s.buyIn)}</span><small>${why || `最大 ${fmt(s.buyIn * maxM)}`}</small></span></button>`;
+      <span style="text-align:right"><span class="buy">${fmt(s.buyIn)}</span><small>${sub}</small></span></button>`;
   }).join('');
 }
 function stakesHTML() {
@@ -132,40 +134,55 @@ function queueHTML() {
   const w = Math.max(1, Math.min(3, Q.waiting || 1)), left = Math.max(0, QUEUE_MAX_S - Math.floor((Date.now() - Q.t0) / 1000));
   const off = 289 * (1 - left / QUEUE_MAX_S);
   const buy = Q.stake === 'free' ? 'FREEROLL' : `${STAKE_LABEL[Q.stake]} · ${fmt(STAKES[Q.stake].buyIn)}`;
+  const slot = i => {
+    if (i >= w) return '';
+    return i === 0 ? 'YOU' : '●';
+  };
+  const slots = [0, 1, 2].map(i => `<i class="${i < w ? 'on' : ''}">${slot(i)}</i>`).join('');
   return `<div class="qbox"><div class="q-stake">${buy}</div>
-    <div class="q-slots" aria-label="${w} / 3">${[0, 1, 2].map(i => `<i class="${i < w ? 'on' : ''}">${i < w ? (i === 0 ? 'YOU' : '●') : ''}</i>`).join('')}</div>
+    <div class="q-slots" aria-label="${w} / 3">${slots}</div>
     <div class="q-n"><b>${w}</b> / 3</div>
     <div class="q-count" role="timer" aria-label="${left}s"><svg viewBox="0 0 100 100"><circle class="bgc" cx="50" cy="50" r="46"/><circle class="fg" cx="50" cy="50" r="46" style="stroke-dashoffset:${off.toFixed(1)}"/></svg><b>${left}</b></div>
     <button class="btn ghost" id="qCancel" type="button" style="min-height:44px;min-width:140px;flex:none">Cancel</button></div>`;
 }
 export async function startQueue(stake) {
   if (Q) return;
-  const gen = Math.random();
+  const gen = secureRnd();
   Q = { stake, t0: Date.now(), waiting: 1, timer: 0, gen };
   pane = 'queue'; renderMenu(); bindQueue();
+  const stale = () => !Q || Q.gen !== gen;
   const tick = async () => {
-    if (!Q || Q.gen !== gen) return;
+    if (stale()) return;
     try {
       const r = await app.net.game({ op: 'queue', stake });
-      if (!Q || Q.gen !== gen) return;
-      if (r && r.game) { stopQueueLocal(); return app.nav.enterGame(r.game, { wheel: true, stake }) }
-      if (r && r.waiting) Q.waiting = r.waiting[stake] || Q.waiting;
-      Q.since = r && r.since;
+      if (stale()) return;
+      if (r?.game) { stopQueueLocal(); return app.nav.enterGame(r.game, { wheel: true, stake }) }
+      if (r?.waiting) Q.waiting = r.waiting[stake] || Q.waiting;
+      Q.since = r?.since;
     } catch (e) {
-      if (!Q || Q.gen !== gen) return;
-      if (e.code !== 'network') { stopQueueLocal(); setPane(app.prof ? 'stakes' : 'main'); toast(stake === 'free' ? 'フリーロールは今は参加できません' : 'この卓には参加できません'); app.nav.refreshMe(); return }
+      if (stale()) return;
+      if (e.code !== 'network') return queueRefused(stake);
     }
     repaintQueue();
     Q.timer = setTimeout(tick, QUEUE_POLL_MS);
   };
   Q.ui = setInterval(repaintQueue, 1000);
-  tick();
+  void tick();
+}
+function queueRefused(stake) {
+  stopQueueLocal(); setPane(app.prof ? 'stakes' : 'main');
+  toast(stake === 'free' ? 'フリーロールは今は参加できません' : 'この卓には参加できません');
+  void app.nav.refreshMe();
 }
 function repaintQueue() { if (Q && pane === 'queue') { const el = root(); const h = queueHTML(); if (el._h !== h) { el._h = h; el.innerHTML = h; bindQueue() } } }
 function bindQueue() { const b = $('#qCancel'); if (b) b.onclick = cancelQueue }
-function stopQueueLocal() { if (!Q) return; clearTimeout(Q.timer); clearInterval(Q.ui); Q = null }
+function stopQueueLocal() {
+  if (!Q) return;
+  clearTimeout(Q.timer); clearInterval(Q.ui); Q = null;
+}
 export function cancelQueue() {
-  if (!Q) return; stopQueueLocal();
+  if (!Q) return;
+  stopQueueLocal();
   app.net.game({ op: 'leave' }).catch(() => {});
   setPane('main');
 }
@@ -181,36 +198,50 @@ export function openProfile() {
   openDlg('#profDlg');
   $('#nickSave').onclick = saveNick;
   $('#logoutBtn').onclick = async () => { $('#profDlg').close(); cancelQueue(); await app.nav.logout() };
-  $('#nickIn').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); saveNick() } };
+  $('#nickIn').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); void saveNick() } };
 }
+const NICK_ERR = new Map([['nickname_taken', 'その名前は使われています'], ['nickname_invalid', '1〜16文字で入力してください']]);
 async function saveNick() {
   const v = $('#nickIn').value.trim(), err = $('#nickErr');
   if (v === app.prof.nickname) return $('#profDlg').close();
   try { await app.net.rpc('set_nickname', { p_name: v }); await app.nav.refreshMe(); $('#profDlg').close() }
-  catch (e) { err.hidden = false; err.textContent = e.code === 'nickname_taken' ? 'その名前は使われています' : e.code === 'nickname_invalid' ? '1〜16文字で入力してください' : '保存できませんでした' }
+  catch (e) { err.hidden = false; err.textContent = NICK_ERR.get(e.code) || '保存できませんでした' }
 }
 
 /* ---------- ranking ---------- */
 let rankTab = 'season';
-export function openRanking() { rankTab = 'season'; paintRank(); openDlg('#rankDlg'); loadRank() }
+export function openRanking() { rankTab = 'season'; paintRank(); openDlg('#rankDlg'); void loadRank() }
 const rankHead = () => head('RANKING', 'Ranking') + `<div class="seg" id="rankSeg"><button type="button" data-t="season" aria-pressed="${rankTab === 'season'}">Season</button><button type="button" data-t="hof" aria-pressed="${rankTab === 'hof'}">Hall of Fame</button></div>`;
 function paintRank(body = '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>') {
   const el = $('#rankBody'); el.innerHTML = rankHead() + body;
-  el.querySelector('#rankSeg').onclick = e => { const b = e.target.closest('button'); if (!b || b.dataset.t === rankTab) return; rankTab = b.dataset.t; paintRank(); loadRank() };
+  el.querySelector('#rankSeg').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b || b.dataset.t === rankTab) return;
+    rankTab = b.dataset.t; paintRank(); void loadRank();
+  };
+}
+const NO_RECORD = '<div class="empty-note">まだ記録がありません</div>';
+const rankRow = x => `<li class="${x.me ? 'me' : ''}${x.rank === 1 ? ' top1' : ''}"><span class="rk">${x.rank}</span><span class="nm2">${esc(x.nickname)}</span><span class="rt">${fmt(x.chips)}</span></li>`;
+const rankList = (rows, cls = 'rank') => `<ol class="${cls}">${rows.map(rankRow).join('')}</ol>`;
+function seasonSub(s) {
+  if (!s) return '';
+  const days = s.endsAt ? Math.ceil((new Date(s.endsAt).getTime() - Date.now()) / 86400000) : null;
+  const left = days == null ? '' : ` · ${Math.max(0, days)} DAYS LEFT`;
+  return `<div class="rk-sub">${esc(s.id || '')}${left}</div>`;
+}
+async function loadSeason(tab) {
+  const r = await app.net.rpc('ranking'); if (rankTab !== tab) return;
+  const mine = r.me && !r.top.some(x => x.me) ? rankList([{ ...r.me, me: true }], 'rank rank-me') : '';
+  paintRank(seasonSub(r.season) + (r.top.length ? rankList(r.top) : NO_RECORD) + mine);
+  $('#rankBody .rank li.me')?.scrollIntoView({ block: 'nearest' });
+}
+async function loadHof(tab) {
+  const r = await app.net.rpc('hall_of_fame'); if (rankTab !== tab) return;
+  const seasons = () => r.map(s => `<h4>${esc(s.season)}</h4>${rankList(s.top)}`).join('');
+  paintRank(r.length ? `<div class="hof">${seasons()}</div>` : NO_RECORD);
 }
 async function loadRank() {
-  const tab = rankTab, row = x => `<li class="${x.me ? 'me' : ''}${x.rank === 1 ? ' top1' : ''}"><span class="rk">${x.rank}</span><span class="nm2">${esc(x.nickname)}</span><span class="rt">${fmt(x.chips)}</span></li>`;
-  try {
-    if (tab === 'season') {
-      const r = await app.net.rpc('ranking'); if (rankTab !== tab) return;
-      const days = r.season && r.season.endsAt ? Math.ceil((new Date(r.season.endsAt).getTime() - Date.now()) / 86400000) : null;
-      paintRank((r.season ? `<div class="rk-sub">${esc(r.season.id || '')}${days != null ? ` · ${Math.max(0, days)} DAYS LEFT` : ''}</div>` : '') +
-        (r.top.length ? `<ol class="rank">${r.top.map(row).join('')}</ol>` : '<div class="empty-note">まだ記録がありません</div>') +
-        (r.me && !r.top.some(x => x.me) ? `<ol class="rank rank-me">${row({ ...r.me, me: true })}</ol>` : ''));
-      const me = $('#rankBody .rank li.me'); if (me) me.scrollIntoView({ block: 'nearest' });
-    } else {
-      const r = await app.net.rpc('hall_of_fame'); if (rankTab !== tab) return;
-      paintRank(r.length ? `<div class="hof">${r.map(s => `<h4>${esc(s.season)}</h4><ol class="rank">${s.top.map(row).join('')}</ol>`).join('')}</div>` : '<div class="empty-note">まだ記録がありません</div>');
-    }
-  } catch (e) { if (rankTab === tab) paintRank('<div class="empty-note">読み込めませんでした</div>') }
+  const tab = rankTab;
+  try { await (tab === 'season' ? loadSeason(tab) : loadHof(tab)) }
+  catch (e) { if (rankTab === tab) paintRank('<div class="empty-note">読み込めませんでした</div>') }
 }

@@ -5,32 +5,44 @@ import { legalActions } from '../engine.js';
 const RE_ACT = /^\{(\d)\} (folds|checks|calls (\d+)|bets (\d+)|raises to (\d+))( \(all-in\))?$/;
 const RE_POST = /^\{(\d)\} posts (SB|BB) (\d+)/;
 
+const textOf = (e) => (e.text !== undefined ? e.text : e);
+const streetOf = (t) => {
+  if (t.startsWith('Flop:')) return 'flop';
+  if (t.startsWith('Turn:')) return 'turn';
+  if (t.startsWith('River:')) return 'river';
+  return null;
+};
+// one log line of `street` => { seat, street, type, to, pay, allIn }, or null when it is not an action
+function parseLine(t, street) {
+  let m = RE_POST.exec(t);
+  if (m) return { seat: +m[1], street, type: m[2] === 'SB' ? 'sb' : 'bb', to: +m[3], pay: +m[3], allIn: t.includes('(all-in)') };
+  m = RE_ACT.exec(t);
+  if (!m) return null;
+  const seat = +m[1], allIn = !!m[6];
+  if (m[2] === 'folds') return { seat, street, type: 'fold', allIn: false };
+  if (m[2] === 'checks') return { seat, street, type: 'check', allIn: false };
+  if (m[3] !== undefined) return { seat, street, type: 'call', pay: +m[3], allIn };
+  if (m[4] !== undefined) return { seat, street, type: 'bet', to: +m[4], allIn };
+  return { seat, street, type: 'raise', to: +m[5], allIn };
+}
+
 // Parse the current hand's actions from view.log. => [{ seat, street, type, to, pay, allIn }]
 export function parseHand(view) {
   const log = view.log || [];
   let start = 0;
   for (let i = log.length - 1; i >= 0; i--) {
-    const t = log[i].text !== undefined ? log[i].text : log[i];
+    const t = textOf(log[i]);
     if (typeof t === 'string' && t.startsWith('Hand ' + view.handNo + ' ')) { start = i + 1; break; }
   }
   const acts = [];
   let street = 'preflop';
   for (let i = start; i < log.length; i++) {
-    const t = log[i].text !== undefined ? log[i].text : log[i];
+    const t = textOf(log[i]);
     if (typeof t !== 'string') continue;
-    if (t.startsWith('Flop:')) { street = 'flop'; continue; }
-    if (t.startsWith('Turn:')) { street = 'turn'; continue; }
-    if (t.startsWith('River:')) { street = 'river'; continue; }
-    let m = RE_POST.exec(t);
-    if (m) { acts.push({ seat: +m[1], street, type: m[2] === 'SB' ? 'sb' : 'bb', to: +m[3], pay: +m[3], allIn: t.includes('(all-in)') }); continue; }
-    m = RE_ACT.exec(t);
-    if (!m) continue;
-    const seat = +m[1], allIn = !!m[6];
-    if (m[2] === 'folds') acts.push({ seat, street, type: 'fold', allIn: false });
-    else if (m[2] === 'checks') acts.push({ seat, street, type: 'check', allIn: false });
-    else if (m[3] !== undefined) acts.push({ seat, street, type: 'call', pay: +m[3], allIn });
-    else if (m[4] !== undefined) acts.push({ seat, street, type: 'bet', to: +m[4], allIn });
-    else acts.push({ seat, street, type: 'raise', to: +m[5], allIn });
+    const s = streetOf(t);
+    if (s) { street = s; continue; }
+    const a = parseLine(t, street);
+    if (a) acts.push(a);
   }
   return acts;
 }
@@ -47,7 +59,10 @@ export function analyze(view, seat) {
   const sbSeat = n === 2 ? button : nextAlive(button);
   const bbSeat = nextAlive(sbSeat);
   const hu = n === 2;
-  const posOf = (s) => (s === bbSeat ? 'bb' : s === sbSeat ? 'sb' : 'btn'); // in HU the button is the sb
+  const posOf = (s) => {                                // in HU the button is the sb
+    if (s === bbSeat) return 'bb';
+    return s === sbSeat ? 'sb' : 'btn';
+  };
   const start = view.handStart || view.seats.map((s, i) => s.stack + view.total[i]);
   const startBB = start.map((x) => x / bb);
   const behind = view.seats.map((s) => s.stack);

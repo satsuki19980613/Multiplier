@@ -7,7 +7,10 @@ export const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<':
 export const fmt = n => Math.round(Number(n) || 0).toLocaleString('en-US');
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const setHTML = (el, h) => { if (el._h !== h) { el.innerHTML = h; el._h = h; return true } return false };
-export const head = (eye, title, cls = '') => `<div class="eyebrow">${eye}</div><h2${cls ? ` class="${cls}"` : ''}>${title}</h2>`;
+export const head = (eye, title, cls = '') => {
+  const ca = cls ? ` class="${cls}"` : '';
+  return `<div class="eyebrow">${eye}</div><h2${ca}>${title}</h2>`;
+};
 export const STAKE_LABEL = { low: 'LOW', mid: 'MID', high: 'HIGH', ultra: 'ULTRA', extreme: 'EXTREME', free: 'FREEROLL' };
 /** the label of a stake (the "mode" of the stats and the player modal): 'LOW · 10', 'FREEROLL' */
 export const modeLabel = m => (m === 'free' || !STAKES[m] ? STAKE_LABEL[m] || 'LOW' : `${STAKE_LABEL[m]} · ${fmt(STAKES[m].buyIn)}`);
@@ -49,7 +52,8 @@ export function cardText(c) {
   const s = c & 3, red = s === 1 || s === 2;
   return `<span class="ct${red ? ' red' : ''}">${RANKS[c >> 2]}${SUITS[s]}</span>`;
 }
-export const ordinal = n => n + (n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th');
+const SUFFIX = { 1: 'st', 2: 'nd', 3: 'rd' };
+export const ordinal = n => n + (SUFFIX[n] ?? 'th');
 /** a signed amount (+5 / −1 / ±0; one decimal at most). In Multiplier the stats' "pt" is the chips won or lost */
 export function fmtPt(v) {
   if (v == null) return '–';
@@ -61,8 +65,12 @@ export function fmtPt(v) {
 export const fmtBb = (chips, bb) => { const v = Math.round((chips / (bb || 1)) * 10) / 10; return (v % 1 === 0 ? String(v) : v.toFixed(1)); };
 
 // one chip label flying between two elements
-export function fly(fromEl, toEl, label, cls, delay = 0, done, D = 650) {
-  if (REDUCE || !fromEl || !toEl || document.hidden) { done && done(); return }
+export function fly(fromEl, toEl, label, cls, delay, done, D = 650) {
+  if (REDUCE || !fromEl || !toEl || document.hidden) {
+    done?.();
+    return;
+  }
+  const wait = delay ?? 0;
   const ra = fromEl.getBoundingClientRect(), rb = toEl.getBoundingClientRect();
   const el = document.createElement('div'); el.className = 'fly ' + cls; el.textContent = label; document.body.appendChild(el);
   const w = el.offsetWidth, h = el.offsetHeight, x0 = ra.left + ra.width / 2 - w / 2, y0 = ra.top + ra.height / 2 - h / 2,
@@ -71,8 +79,13 @@ export function fly(fromEl, toEl, label, cls, delay = 0, done, D = 650) {
     { transform: `translate(${x0}px,${y0}px) scale(.8)`, opacity: 0 },
     { transform: `translate(${x0}px,${y0}px) scale(1)`, opacity: 1, offset: .15 },
     { transform: `translate(${x1}px,${y1}px) scale(1)`, opacity: 1, offset: .85 },
-    { transform: `translate(${x1}px,${y1}px) scale(.7)`, opacity: 0 }], { duration: D, delay, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'both' });
+    { transform: `translate(${x1}px,${y1}px) scale(.7)`, opacity: 0 }], { duration: D, delay: wait, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'both' });
   let ended = false;
-  const end = () => { if (ended) return; ended = true; el.remove(); if (toEl.animate) toEl.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 280, easing: 'ease-out' }); done && done() };
-  an.onfinish = end; setTimeout(end, D + delay + 150);
+  const end = () => {
+    if (ended) return;
+    ended = true; el.remove();
+    if (toEl.animate) toEl.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 280, easing: 'ease-out' });
+    done?.();
+  };
+  an.onfinish = end; setTimeout(end, D + wait + 150);
 }

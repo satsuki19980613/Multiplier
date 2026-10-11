@@ -56,5 +56,5 @@ export const huCall = (cls, eff) => lerp(HU.call, HU.stacks, eff, cls);
 // 3-handed, node in a|sp|sc|b1|b2|b3; stack in bb (table range 2..25, clamped)
 export const twProb = (node, cls, stack) => lerp(twRows[node], TW.stacks, stack, cls);
 
-export const TW_MAX = TW.stacks[TW.stacks.length - 1];
-export const HU_MAX = HU.stacks[HU.stacks.length - 1];
+export const TW_MAX = TW.stacks.at(-1);
+export const HU_MAX = HU.stacks.at(-1);

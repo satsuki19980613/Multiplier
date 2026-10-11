@@ -13,60 +13,58 @@ const GAME_OPS={retire:'retire',tick:'tick',sitout:'sitout',sitin:'sitin',stay:'
 // fx: a KLIPY slug, or null / missing (the value itself is normalised by the rules; only the type is checked here)
 const fxOk=x=>x==null||(typeof x==='string'&&x.length<=200);
 
+const isUuid=x=>typeof x==='string'&&UUID.test(x);
+// op -> [is the body well-formed?, call deps]
+const OPS=new Map(Object.entries({
+  queue:[b=>STAKE_KEYS.includes(b.stake),(d,uid,b)=>d.queue(uid,b.stake)],
+  leave:[()=>true,(d,uid)=>d.leave(uid)],
+  act:[b=>isUuid(b.game)&&Number.isInteger(b.ver)&&b.move&&typeof b.move==='object',(d,uid,b)=>d.act(uid,b.game,{ver:b.ver,move:b.move})],
+  ...Object.fromEntries(Object.entries(GAME_OPS).map(([op,fn])=>[op,[b=>isUuid(b.game),(d,uid,b)=>d[fn](uid,b.game)]])),
+  fx:[b=>isUuid(b.game)&&fxOk(b.fx),(d,uid,b)=>d.fx(uid,b.game,b.fx??null)],
+  chat:[b=>isUuid(b.game)&&typeof b.text==='string'&&b.text.length<=400,(d,uid,b)=>d.chat(uid,b.game,b.text)],
+  room_create:[b=>ROOM_STAKES.includes(b.stake)&&fxOk(b.fx),(d,uid,b)=>d.roomCreate(uid,b.stake,b.fx??null)],
+  room_peek:[b=>typeof b.code==='string'&&CODE_RE.test(b.code),(d,uid,b)=>d.roomPeek(uid,b.code)],
+  room_join:[b=>typeof b.code==='string'&&CODE_RE.test(b.code)&&fxOk(b.fx),(d,uid,b)=>d.roomJoin(uid,b.code,b.fx)],
+  room_wait:[b=>isUuid(b.room),(d,uid,b)=>d.roomWait(uid,b.room)],
+  room_start:[b=>isUuid(b.room),(d,uid,b)=>d.roomStart(uid,b.room)],
+  room_leave:[b=>isUuid(b.room),(d,uid,b)=>d.roomLeave(uid,b.room)],
+}));
+
+// the uid of a valid "Bearer" token, else null
+async function authUid(req,verifyToken){
+  const m=/^Bearer\s+(\S+)$/i.exec(req.headers.get('Authorization')??'');
+  if(!m)return null;
+  try{return await verifyToken(m[1])}catch{return null}
+}
+// the JSON object of the body, or null when it is too long / not JSON / not an object
+async function readBody(req){
+  try{
+    const t=await req.text();
+    if(t.length>MAX_BODY)return null;
+    const body=JSON.parse(t);
+    return body&&typeof body==='object'?body:null;
+  }catch{return null}
+}
+
 export function createHandler(deps){
   const allowed=new Set(deps.allowedOrigins);
   const log=deps.logError??((m,e)=>console.error(m,e));
   return async req=>{
     const origin=req.headers.get('Origin');
-    const cors={Vary:'Origin'};if(origin&&allowed.has(origin))cors['Access-Control-Allow-Origin']=origin;
+    const cors={Vary:'Origin'};
+    if(origin&&allowed.has(origin))cors['Access-Control-Allow-Origin']=origin;
     const reply=(status,body)=>new Response(JSON.stringify(body),{status,headers:{...cors,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
     if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{...cors,'Access-Control-Allow-Methods':'POST, OPTIONS','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Max-Age':'600'}});
     if(req.method!=='POST')return reply(405,{error:'method_not_allowed'});
-    const m=/^Bearer\s+(\S+)$/i.exec(req.headers.get('Authorization')??'');
-    let uid=null;if(m)try{uid=await deps.verifyToken(m[1])}catch{uid=null}
+    const uid=await authUid(req,deps.verifyToken);
     if(!uid)return reply(401,{error:'not_authenticated'});
-    let body;
-    try{const t=await req.text();if(t.length>MAX_BODY)return reply(422,{error:'malformed'});body=JSON.parse(t)}catch{return reply(422,{error:'malformed'})}
-    if(!body||typeof body!=='object')return reply(422,{error:'malformed'});
+    const body=await readBody(req),op=body&&OPS.get(body.op);
+    if(!op?.[0](body))return reply(422,{error:'malformed'});
     try{
-      switch(body.op){
-        case'queue':
-          if(!STAKE_KEYS.includes(body.stake))return reply(422,{error:'malformed'});
-          return reply(200,await deps.queue(uid,body.stake));
-        case'leave':
-          return reply(200,await deps.leave(uid));
-        case'act':
-          if(!(typeof body.game==='string'&&UUID.test(body.game))||!Number.isInteger(body.ver)||!body.move||typeof body.move!=='object')return reply(422,{error:'malformed'});
-          return reply(200,await deps.act(uid,body.game,{ver:body.ver,move:body.move}));
-        case'retire':case'tick':case'sitout':case'sitin':case'stay':case'depart':case'rematch':
-          if(!(typeof body.game==='string'&&UUID.test(body.game)))return reply(422,{error:'malformed'});
-          return reply(200,await deps[GAME_OPS[body.op]](uid,body.game));
-        case'fx':
-          if(!(typeof body.game==='string'&&UUID.test(body.game))||!fxOk(body.fx))return reply(422,{error:'malformed'});
-          return reply(200,await deps.fx(uid,body.game,body.fx??null));
-        case'chat':
-          if(!(typeof body.game==='string'&&UUID.test(body.game))||typeof body.text!=='string'||body.text.length>400)return reply(422,{error:'malformed'});
-          return reply(200,await deps.chat(uid,body.game,body.text));
-        case'room_create':
-          if(!ROOM_STAKES.includes(body.stake)||!fxOk(body.fx))return reply(422,{error:'malformed'});
-          return reply(200,await deps.roomCreate(uid,body.stake,body.fx??null));
-        case'room_peek':
-          if(!(typeof body.code==='string'&&CODE_RE.test(body.code)))return reply(422,{error:'malformed'});
-          return reply(200,await deps.roomPeek(uid,body.code));
-        case'room_join':
-          if(!(typeof body.code==='string'&&CODE_RE.test(body.code))||!fxOk(body.fx))return reply(422,{error:'malformed'});
-          return reply(200,await deps.roomJoin(uid,body.code,body.fx));
-        case'room_wait':
-        case'room_start':
-        case'room_leave':
-          if(!(typeof body.room==='string'&&UUID.test(body.room)))return reply(422,{error:'malformed'});
-          return reply(200,await deps[{room_wait:'roomWait',room_start:'roomStart',room_leave:'roomLeave'}[body.op]](uid,body.room));
-        default:
-          return reply(422,{error:'malformed'});
-      }
+      return reply(200,await op[1](deps,uid,body));
     }catch(e){
       if(e instanceof MoveError){
-        return reply(STATUS[e.code]??422,{error:e.code,...(e.extra||{})});
+        return reply(STATUS[e.code]??422,{error:e.code,...e.extra});
       }
       log('game: unexpected error',e);
       return reply(500,{error:'internal'});

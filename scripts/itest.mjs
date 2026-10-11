@@ -19,7 +19,8 @@ else{
   pool=new pg.Pool({connectionString:await connectionString(branch),max:8});
 }
 const U=Array.from({length:7},(_,i)=>`00000000-0000-4000-8000-0000000000a${i+1}`);
-const ok=(c,m)=>{if(!c)throw new Error('FAIL '+m);console.log('ok  '+m)};
+const ok=(c,m)=>{if(!c){throw new Error('FAIL '+m)}console.log('ok  '+m)};
+const need=(x,m)=>{if(x==null){throw new Error('FAIL missing '+m)}return x};
 const codeOf=async f=>{try{await f()}catch(e){return e.code&&!/^[0-9A-Z]{5}$/.test(e.code)?e.code:e.message}return null};
 async function rpc(uid,sql,args=[]){
   const c=await pool.connect();
@@ -40,33 +41,39 @@ const setChips=(uid,n)=>pool.query('update public.profiles set chips=$2 where ui
 const closeGames=()=>pool.query("update public.games set status='over' where status='active' and players && $1::uuid[]",[U]);
 const agedQueue=()=>pool.query('update public.queue set since=now()-make_interval(secs => $1::float8/1000+1) where uid=any($2::uuid[])',[BOT_WAIT_MS,U]);
 const freshQueue=()=>pool.query('delete from public.queue where uid=any($1::uuid[])',[U]);
+const resetChips=(us=U)=>Promise.all(us.map(u=>setChips(u,10000)));
 
+// one after another: a poll may write the same games row
+const pollAll=async(game,humans)=>{
+  const views={};
+  for(const u of humans){views[u]=(await rpc(u,'select public.game_poll($1,-1)',[game])).view}
+  return views;
+};
+// one step: the human to act moves (the bot logic on their own view); otherwise bots / time-outs are driven by tick
+async function playStep(game,humans,views,steps,fold){
+  const v0=views[humans[0]],seat=v0.toAct;
+  const h=humans.find(u=>views[u].meta.seat===seat);
+  if(!h||v0.meta.bot[seat]){skew.v+=60000;await db.tick(humans[0],game);return}
+  const foldMove={type:legalActions(views[h]).canCheck?'check':'fold'};
+  const mv=fold?foldMove:botMove(views[h],seat,{persona:'tight',rnd:Math.random});
+  if(steps===3){const c=await codeOf(()=>db.act(h,game,{ver:views[h].ver-1,move:mv}));ok(c==='stale','stale version is refused')}
+  await db.act(h,game,{ver:views[h].ver,move:mv});
+}
+// eliminated and only bots left: the table must already be over in the database
+async function endedAfterElimination(game,v){
+  if(v.places[v.meta.seat]===null)return false;
+  const st=(await pool.query('select status from public.games where id=$1',[game])).rows[0].status;
+  ok(st==='over'&&v.over,'eliminated human, only bots left: the table is finished at once');
+  return true;
+}
 // plays a game to the end. Humans move (the bot logic on their own view); bots / time-outs are driven by tick with a skewed clock.
 async function playOut(game,humans,label,{fold=false}={}){
-  let steps=0,views;
-  const poll=async()=>{views={};for(const u of humans)views[u]=(await rpc(u,'select public.game_poll($1,-1)',[game])).view};
-  await poll();
+  let steps=0,views=await pollAll(game,humans);
   while(!views[humans[0]].over&&steps++<4000){
     skew.v+=20000;   // time passes (blinds go up), so even a passive bot pair ends the game
-    const v0=views[humans[0]],seat=v0.toAct;
-    const h=humans.find(u=>views[u].meta.seat===seat);
-    if(h&&!v0.meta.bot[seat]){
-      const mv=fold?{type:legalActions(views[h]).canCheck?'check':'fold'}:botMove(views[h],seat,{persona:'tight',rnd:Math.random});
-      if(steps===3){const c=await codeOf(()=>db.act(h,game,{ver:views[h].ver-1,move:mv}));ok(c==='stale','stale version is refused')}
-      await db.act(h,game,{ver:views[h].ver,move:mv});
-    }else{
-      skew.v+=60000;
-      await db.tick(humans[0],game);
-    }
-    await poll();
-    if(fold&&humans.length===1){   // eliminated and only bots left: the table must already be over in the database
-      const v=views[humans[0]];
-      if(v.places[v.meta.seat]!==null){
-        const st=(await pool.query('select status from public.games where id=$1',[game])).rows[0].status;
-        ok(st==='over'&&v.over,'eliminated human, only bots left: the table is finished at once');
-        break;
-      }
-    }
+    await playStep(game,humans,views,steps,fold);
+    views=await pollAll(game,humans);
+    if(fold&&humans.length===1&&await endedAfterElimination(game,views[humans[0]]))break;
   }
   ok(views[humans[0]].over,`${label}: game over after ${steps} steps`);
   return views;
@@ -103,7 +110,7 @@ try{
   ok(g0r.players.filter(Boolean).length===2&&g0r.players.includes(U[0])&&g0r.players.includes(U[1]),'two humans + one bot (null seat)');
   ok(await chipsOf(U[0])===9990&&await chipsOf(U[1])===9990,'both paid the buy-in');
   await closeGames();
-  for(const u of U)await setChips(u,10000);
+  await resetChips();
 
   // ---- three humans: two already waiting when a third comes (e.g. they queued in the same instant) => one table of three ----
   await pool.query("insert into public.queue(uid,stake) select unnest($1::uuid[]),'low'",[[U[0],U[1]]]);
@@ -119,9 +126,8 @@ try{
   const txt=JSON.stringify(v.view);
   ok(!txt.includes('"deck"')&&!txt.includes('"seed"')&&v.view.holes.filter(Boolean).length===1,'view hides the deck and the other hole cards');
   ok((await rpc(U[0],'select public.game_poll($1,$2)',[g1,v.view.ver])).view===null,'poll with the same ver returns no view');
-  const before=[U[0],U[1],U[2]].map(Number);void before;
   const views=await playOut(g1,[U[0],U[1],U[2]],'3 humans');
-  const res=views[U[0]].meta.result,prize=res.prize;
+  const res=need(views[U[0]]?.meta.result,'3 humans: result of the finished table'),prize=res.prize;
   const total=(await Promise.all([U[0],U[1],U[2]].map(chipsOf))).reduce((a,b)=>a+b,0);
   ok(total===3*10000-30+prize,`chips: 30 buy-in paid, prize ${prize} paid to the winner (total ${total})`);
   ok(res.after.every((x,i)=>x===null||typeof x==='number')&&res.payouts.filter(x=>x>0).length===1,'result has payouts and balances');
@@ -157,7 +163,7 @@ try{
   else console.log(`--  pairing not checked: a round took ${(round/1000).toFixed(1)} s (over QUEUE_FRESH_MS)`);
   await freshQueue();
   await closeGames();
-  for(const u of U)await setChips(u,10000);
+  await resetChips();
 
   // ---- humans + bots ----
   await freshQueue();
@@ -181,22 +187,23 @@ try{
   ok(bn3.length===2&&bn3[0]!==bn3[1],'two different bot names '+bn3);
   const c3=await chipsOf(U[2]);
   const views3=await playOut(g3,[U[2]],'1 human + 2 bots (human time-outs and bots, driven by tick)');
-  const res3=views3[U[2]].meta.result;
-  ok(await chipsOf(U[2])===c3+res3.payouts[views3[U[2]].meta.seat],'a human winner gets the prize; a bot win pays nothing');
+  const f3=need(views3[U[2]],'1 human + 2 bots: final view'),res3=need(f3.meta.result,'1 human + 2 bots: result of the finished table');
+  ok(await chipsOf(U[2])===c3+res3.payouts[f3.meta.seat],'a human winner gets the prize; a bot win pays nothing');
   ok((await db.tick(U[2],g3).catch(e=>e.code))==='game_over','tick on a finished table is game_over');
   ok((await db.act(U[2],g3,{ver:1,move:{type:'fold'}}).catch(e=>e.code))==='game_over','act on a finished table is game_over');
   await closeGames();
 
   // a human who always folds is eliminated at some point; with only bots left the table ends at once
-  await freshQueue();for(const u of U)await setChips(u,10000);
+  await freshQueue();await resetChips();
   await db.queue(U[5],'low');await agedQueue();
   const g4=(await db.queue(U[5],'low')).game;
   const v4=await playOut(g4,[U[5]],'always-folding human + 2 bots',{fold:true});
-  ok(v4[U[5]].meta.result!==null&&v4[U[5]].meta.result.after[v4[U[5]].meta.seat]===await chipsOf(U[5]),'result of the finished table has the balance');
+  const f4=need(v4[U[5]],'always-folding human: final view');
+  ok(f4.meta.result!==null&&f4.meta.result.after[f4.meta.seat]===await chipsOf(U[5]),'result of the finished table has the balance');
   await closeGames();
 
   // an eliminated human on a table that is still running: free to queue again, can still watch
-  await freshQueue();for(const u of U)await setChips(u,10000);
+  await freshQueue();await resetChips();
   await db.queue(U[0],'low');await db.queue(U[1],'low');await agedQueue();
   const g5=(await db.queue(U[0],'low')).game;
   const seat0=(await pool.query('select players from public.games where id=$1',[g5])).rows[0].players.indexOf(U[0]);
@@ -251,7 +258,7 @@ try{
   await freshQueue();
 
   // ---- purge: 7 days after the last change; an abandoned active table gives the buy-ins back ----
-  for(const u of U.slice(0,3))await setChips(u,10000);
+  await resetChips(U.slice(0,3));
   await db.queue(U[0],'low');const gp=(await db.queue(U[1],'low')).game;
   const gold=(await pool.query(`insert into public.games(id,players,stake,multiplier,prize,status,state,ver,views,updated_at)
     values(gen_random_uuid(),$1::uuid[],'low',2,20,'over','{}',1,'[]',now()-interval '8 days') returning id`,[[U[4],null,null]])).rows[0].id;
@@ -265,13 +272,13 @@ try{
 
   // ---- season roll-over ----
   await pool.query("update public.profiles set played=1 where uid=any($1::uuid[])",[U]);
-  for(let i=0;i<U.length;i++)await setChips(U[i],20000-i*1000);
+  await Promise.all(U.map((u,i)=>setChips(u,20000-i*1000)));
   await pool.query("update public.seasons set id='2026-H1',starts_at='2026-04-01 00:00+09',ends_at='2026-10-01 00:00+09' where id='2026-H2'");
   const mr=await me(U[0]);
   ok(mr.season.id==='2026-H2'&&mr.chips===10000&&mr.freeroll.used===0,'season rolled over: new season 2026-H2, chips back to 10,000');
   const hall=await rpc(U[0],'select public.hall_of_fame()');
   ok(hall.length===1&&hall[0].season==='2026-H1'&&hall[0].top.length>=1,'hall of fame records the closed season');
-  const mine=hall[0].top.filter(t=>/^ItestP/.test(t.nickname));
+  const mine=hall[0].top.filter(t=>t.nickname?.startsWith('ItestP'));
   ok(mine.length>=1&&mine[0].chips>=mine[mine.length-1].chips&&hall[0].top.every((t,i)=>t.rank===i+1)&&hall[0].top.length<=10,'top 10 by chips, rank 1..n');
   ok((await pool.query("select count(*)::int n from public.seasons where not closed")).rows[0].n===1,'exactly one open season');
   const rk2=await rpc(U[0],'select public.ranking()');ok(rk2.top.length===0&&rk2.me===null,'ranking starts empty after the reset (nobody has played yet)');

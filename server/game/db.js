@@ -42,16 +42,74 @@ async function tx(pool,fn){
 }
 
 const num=x=>x===null||x===undefined?null:Number(x);
+// uuids in Postgres order (the canonical lower-case text form sorts like the bytes)
+const byUid=(a,b)=>{
+  if(a===b)return 0;
+  return a<b?-1:1;
+};
+
+// counts of fresh waiting players per stake
+async function waitingCounts(c){
+  const r=await c.query(`select stake,count(*)::int as n from public.queue where ${FRESH} group by stake`,[QUEUE_FRESH_MS]);
+  const w=Object.fromEntries(STAKE_KEYS.map(k=>[k,0]));
+  for(const x of r.rows)w[x.stake]=x.n;
+  return w;
+}
+
+// lock profiles in uid order => Map uid -> { uid, nickname, chips, frUsedToday }
+async function lockProfiles(c,uids){
+  const r=await c.query(`select uid,nickname,chips,freeroll_used,(freeroll_day=(now() at time zone 'Asia/Tokyo')::date) as fr_today
+    from public.profiles where uid=any($1::uuid[]) order by uid for no key update`,[[...uids].sort(byUid)]);
+  return new Map(r.rows.map(r=>[r.uid,{uid:r.uid,nickname:r.nickname,chips:Number(r.chips),frUsedToday:r.fr_today?r.freeroll_used:0}]));
+}
+// of `uids`, those still playing at a running table (an eliminated player is free) => Map uid -> game id
+async function seatedAt(c,uids){
+  const r=await c.query("select id,players,state->'g'->'places' as places from public.games where status='active' and players && $1::uuid[]",[uids]);
+  return new Map(r.rows.flatMap(g=>g.players.map((u,i)=>u&&uids.includes(u)&&g.places[i]===null?[u,g.id]:null).filter(Boolean)));
+}
+
+// the caller's game row, locked. over = also a finished game (seat ops after the end: stay / leave / rematch / GIF)
+async function loadGame(c,uid,gameId,over=false){
+  const r=await c.query('select id,players,status,state from public.games where id=$1 for update',[gameId]);
+  const row=r.rows[0];
+  const seat=row?row.players.indexOf(uid):-1;
+  if(seat<0)throw new MoveError('not_found');
+  if(row.status!=='active'&&!over)throw new MoveError('game_over');
+  return{seat,row:{id:row.id,players:row.players,g:row.state.g,meta:row.state.meta}};
+}
+
+const canEnter=(p,stake)=>{
+  try{checkEntry(p,stake);return true}catch{return false}
+};
+
+// The caller may make or enter a room of `stake`: not seated at a running table (in_game, with the game) and able to pay.
+async function checkRoomEntry(c,uid,stake){
+  const P=await lockProfiles(c,[uid]),p=P.get(uid);
+  if(!p)throw new MoveError('no_profile');
+  const s=await seatedAt(c,[uid]);
+  if(s.has(uid))throw new MoveError('in_game',{game:s.get(uid)});
+  checkEntry(p,stake);
+  return p;
+}
+
+// The (up to) three earliest fresh waiters of `stake` who can enter (profiles in P, not seated at a table: busy); anybody else who can
+// no longer enter is dropped from the queue (the caller stays). => [profile]
+async function takeGroup(c,stake,uid,P,busy){
+  const fresh=await c.query(`select uid from public.queue where stake=$2 and ${FRESH} order by since,uid limit 4`,[QUEUE_FRESH_MS,stake]);
+  const group=[];
+  for(const r of fresh.rows){
+    const p=P.get(r.uid);
+    if(p&&!busy.has(r.uid)&&canEnter(p,stake)){
+      if(group.length<3)group.push(p);
+    }else if(r.uid!==uid){
+      await c.query('delete from public.queue where uid=$1',[r.uid]);
+    }
+  }
+  return group;
+}
 
 export function makeDb(pool,deps={}){
   const now=deps.now??Date.now,rnd=deps.rnd??secureRnd,botMove=deps.botMove??defaultBotMove;
-
-  // counts of fresh waiting players per stake
-  async function waitingCounts(c){
-    const r=await c.query(`select stake,count(*)::int as n from public.queue where ${FRESH} group by stake`,[QUEUE_FRESH_MS]);
-    const w=Object.fromEntries(STAKE_KEYS.map(k=>[k,0]));for(const x of r.rows)w[x.stake]=x.n;
-    return w;
-  }
 
   // write a step of a game back: keep the hands that finished, credit the prize if it ended, store state / meta / views.
   // Returns what the caller replies.
@@ -62,7 +120,7 @@ export function makeDb(pool,deps={}){
         [row.id,h.handNo,JSON.stringify(recordOf(h)),JSON.stringify(h.hole)]);
     }
     if(out.payouts){
-      const humans=row.players.map((u,i)=>({u,i})).filter(x=>x.u).sort((a,b)=>a.u<b.u?-1:a.u>b.u?1:0);
+      const humans=row.players.map((u,i)=>({u,i})).filter(x=>x.u).sort((a,b)=>byUid(a.u,b.u));
       await c.query('select 1 from public.profiles where uid=any($1::uuid[]) order by uid for no key update',[humans.map(h=>h.u)]);
       const after=[null,null,null];
       for(const h of humans){
@@ -97,18 +155,6 @@ export function makeDb(pool,deps={}){
     return id;
   }
 
-  // lock profiles in uid order => Map uid -> { uid, nickname, chips, frUsedToday }
-  async function lockProfiles(c,uids){
-    const r=await c.query(`select uid,nickname,chips,freeroll_used,(freeroll_day=(now() at time zone 'Asia/Tokyo')::date) as fr_today
-      from public.profiles where uid=any($1::uuid[]) order by uid for no key update`,[[...uids].sort()]);
-    return new Map(r.rows.map(r=>[r.uid,{uid:r.uid,nickname:r.nickname,chips:Number(r.chips),frUsedToday:r.fr_today?r.freeroll_used:0}]));
-  }
-  // of `uids`, those still playing at a running table (an eliminated player is free) => Map uid -> game id
-  async function seatedAt(c,uids){
-    const r=await c.query("select id,players,state->'g'->'places' as places from public.games where status='active' and players && $1::uuid[]",[uids]);
-    return new Map(r.rows.flatMap(g=>g.players.map((u,i)=>u&&uids.includes(u)&&g.places[i]===null?[u,g.id]:null).filter(Boolean)));
-  }
-
   /* ---------- private tables (rooms.js) ---------- */
   const ROOM_COLS='id,code,stake,host,members,status,game,(extract(epoch from created_at)*1000)::float8 as created_ms';
   const toRoom=r=>({id:r.id,code:r.code,stake:r.stake,host:r.host,members:r.members,status:r.status,game:r.game,createdAt:Number(r.created_ms)});
@@ -121,16 +167,6 @@ export function makeDb(pool,deps={}){
     [room.id,JSON.stringify(room.members),room.status,room.game]);
   const roomReply=(room,uid)=>{const t=now();return{room:roomView(room,uid,t),now:t}};
 
-  // The caller may make or enter a room of `stake`: not seated at a running table (in_game, with the game) and able to pay.
-  async function checkRoomEntry(c,uid,stake){
-    const P=await lockProfiles(c,[uid]),p=P.get(uid);
-    if(!p)throw new MoveError('no_profile');
-    const s=await seatedAt(c,[uid]);
-    if(s.has(uid))throw new MoveError('in_game',{game:s.get(uid)});
-    checkEntry(p,stake);
-    return p;
-  }
-
   // Start a waiting room's table when it is ready (auto: full; else the host asked). Members who can no longer play (seated at another
   // table, short of the buy-in) are dropped first; if the host is dropped the room closes. Mutates and returns `room`.
   async function startIfReady(c,room,uid,auto){
@@ -138,8 +174,8 @@ export function makeDb(pool,deps={}){
     const ids=room.members.map(m=>m.uid);
     const P=await lockProfiles(c,ids),busy=await seatedAt(c,ids);
     room.members=room.members.filter(m=>{
-      const p=P.get(m.uid);if(!p||busy.has(m.uid))return false;
-      try{checkEntry(p,room.stake);return true}catch{return false}
+      const p=P.get(m.uid);
+      return Boolean(p)&&!busy.has(m.uid)&&canEnter(p,room.stake);
     });
     if(!room.members.some(m=>m.uid===room.host)){room.status='closed';return room}
     if(room.members.length<(auto?ROOM_SEATS:ROOM_MIN_START))return room;   // somebody dropped: wait for more
@@ -148,15 +184,6 @@ export function makeDb(pool,deps={}){
     return room;
   }
 
-  // the caller's game row, locked. over = also a finished game (seat ops after the end: stay / leave / rematch / GIF)
-  async function loadGame(c,uid,gameId,over=false){
-    const r=await c.query('select id,players,status,state from public.games where id=$1 for update',[gameId]);
-    const row=r.rows[0];
-    const seat=row?row.players.indexOf(uid):-1;
-    if(seat<0)throw new MoveError('not_found');
-    if(row.status!=='active'&&!over)throw new MoveError('game_over');
-    return{seat,row:{id:row.id,players:row.players,g:row.state.g,meta:row.state.meta}};
-  }
   // a request of the seat on its game (act / retire / sitout / sitin / fx / stay / depart)
   const request=(uid,gameId,req,over=false)=>tx(pool,async c=>{
     const{seat,row}=await loadGame(c,uid,gameId,over);
@@ -174,10 +201,8 @@ export function makeDb(pool,deps={}){
 
       // lock the profiles that may take part (the caller and the earliest waiting players) in uid order
       const oth=await c.query(`select uid from public.queue where stake=$2 and uid<>$3 and ${FRESH} order by since,uid limit 3`,[QUEUE_FRESH_MS,stake,uid]);
-      const set=[uid,...oth.rows.map(r=>r.uid)].sort();
-      const pr=await c.query(`select uid,nickname,chips,freeroll_used,(freeroll_day=(now() at time zone 'Asia/Tokyo')::date) as fr_today
-        from public.profiles where uid=any($1::uuid[]) order by uid for no key update`,[set]);
-      const P=new Map(pr.rows.map(r=>[r.uid,{uid:r.uid,nickname:r.nickname,chips:Number(r.chips),frUsedToday:r.fr_today?r.freeroll_used:0}]));
+      const set=[uid,...oth.rows.map(r=>r.uid)].sort(byUid);
+      const P=await lockProfiles(c,set);
       if(!P.has(uid))throw new MoveError('no_profile');
 
       // already at a table: go there
@@ -194,16 +219,7 @@ export function makeDb(pool,deps={}){
         returning (extract(epoch from since)*1000)::float8 as since_ms,(extract(epoch from now()-since)*1000)::float8 as waited_ms`,[uid,stake]);
       const since=q.rows[0].since_ms,waited=q.rows[0].waited_ms;
 
-      // the (up to) three earliest fresh waiters; anybody who can no longer enter is dropped from the queue
-      const fresh=await c.query(`select uid from public.queue where stake=$2 and ${FRESH} order by since,uid limit 4`,[QUEUE_FRESH_MS,stake]);
-      const group=[];
-      for(const r of fresh.rows){
-        const p=P.get(r.uid);
-        let okp=Boolean(p)&&!busy.has(r.uid);
-        if(okp)try{checkEntry(p,stake)}catch{okp=false}
-        if(okp){if(group.length<3)group.push(p)}
-        else if(r.uid!==uid)await c.query('delete from public.queue where uid=$1',[r.uid]);
-      }
+      const group=await takeGroup(c,stake,uid,P,busy);
       const self=group.includes(P.get(uid));
       // MATCH_HUMANS players make a table at once; a lone player gets bots after BOT_WAIT_MS
       if(group.length<MATCH_HUMANS&&!(self&&waited>=BOT_WAIT_MS))return reply(null,since);

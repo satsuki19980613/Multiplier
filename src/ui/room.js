@@ -1,7 +1,7 @@
 // Private table lobby: room code, invite URL (/?room=123456), members. Polls room_wait every ROOM_POLL_MS (a member who stops
 // polling is away, then gone); the table starts when three are here, or when the host starts it with two.
 import { STAKES } from '../spin.js';
-import { ROOM_POLL_MS } from '../../server/game/rooms.js';
+import { ROOM_POLL_MS, CODE_RE } from '../../server/game/rooms.js';
 import { $, app, esc, fmt, head, openDlg, toast, clock, sessGet, sessSet, STAKE_LABEL } from './util.js';
 import { paint, setPane } from './menu.js';
 import { getFx } from './gif.js';
@@ -23,11 +23,18 @@ export function enter(id, first) {
   sessSet(LOBBY_KEY, id);
   setPane('room');
   if (first && apply(R, first)) return;
-  poll();
-  R.ui = setInterval(() => { if (R && R.v) render($('#menuIn')) }, 1000);
+  void poll();
+  R.ui = setInterval(() => { if (R?.v) render($('#menuIn')) }, 1000);
 }
-export function stop() { if (!R) return; clearTimeout(R.timer); clearInterval(R.ui); R = null }
-function quit(msg) { stop(); sessSet(LOBBY_KEY, null); if (msg) toast(msg); app.nav.toMenu() }
+export function stop() {
+  if (!R) return;
+  clearTimeout(R.timer); clearInterval(R.ui); R = null;
+}
+function quit(msg) {
+  stop(); sessSet(LOBBY_KEY, null);
+  if (msg) toast(msg);
+  app.nav.toMenu();
+}
 
 // a reply of the server; true when the lobby is over (the table started or the room closed)
 function apply(r0, x) {
@@ -53,10 +60,10 @@ async function poll() {
   r0.timer = setTimeout(poll, ROOM_POLL_MS);
 }
 // phones suspend the page while the invite is shared in another app: poll at once when it comes back
-document.addEventListener('visibilitychange', () => { if (!document.hidden && R) poll() });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && R) void poll() });
 
 export function render(el) {
-  if (!R || !R.v) return paint(el, '<div class="qbox"><span class="dots" style="margin:14px 0"><i></i><i></i><i></i></span></div>');
+  if (!R?.v) return paint(el, '<div class="qbox"><span class="dots" style="margin:14px 0"><i></i><i></i><i></i></span></div>');
   const v = R.v, n = v.members.length, url = inviteUrl(v.code);
   const left = Math.max(0, Math.ceil((v.expiresAt - clock.now()) / 1000));
   const slots = Array.from({ length: v.seats }, (_, i) => {
@@ -65,6 +72,8 @@ export function render(el) {
     return `<li class="on${m.away ? ' away' : ''}"><span class="sl-n">${i + 1}</span><span class="sl-name">${m.me ? '<span class="me">YOU</span> ' : ''}${esc(m.name)}</span>${m.host ? '<span class="sl-tag">HOST</span>' : ''}</li>`;
   }).join('');
   const canStart = v.isHost && n >= 2 && n < v.seats && !v.members.some(m => m.away);
+  const startOff = canStart && !R.busy ? '' : 'disabled';
+  const startBtn = v.isHost ? `<button class="btn primary" id="roomStart" type="button" ${startOff}>Start</button>` : '';
   paint(el, `<div class="qbox room-box">
       <div class="q-stake">PRIVATE · ${STAKE_LABEL[v.stake]} · ${fmt(STAKES[v.stake].buyIn)}</div>
       <div class="code-big" aria-label="部屋番号 ${esc(v.code)}"><small>ROOM</small>${esc(spaced(v.code))}</div>
@@ -74,7 +83,7 @@ export function render(el) {
       <div class="q-exp" role="timer">${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}</div>
       <div class="btns room-btns">
         <button class="btn ghost" id="roomLeave" type="button">${v.isHost ? '部屋を閉じる' : '退出する'}</button>
-        ${v.isHost ? `<button class="btn primary" id="roomStart" type="button" ${canStart && !R.busy ? '' : 'disabled'}>Start</button>` : ''}
+        ${startBtn}
       </div>
     </div>`, bind);
 }
@@ -113,32 +122,33 @@ function askLeave(isHost) {
 
 async function share(code) {
   const url = inviteUrl(code), text = `Multiplier のプライベート卓に招待します（部屋番号 ${code}）`;
-  if (navigator.share) { try { await navigator.share({ title: 'Multiplier', text, url }); return } catch (e) { if (e && e.name === 'AbortError') return } }
-  copyText(url);
+  if (navigator.share) { try { await navigator.share({ title: 'Multiplier', text, url }); return } catch (e) { if (e?.name === 'AbortError') return } }
+  await copyText(url);
 }
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast('コピーしました') }
-  catch (e) {
+  catch {
+    // no clipboard permission (some in-app browsers): the old selection copy
     const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); toast('コピーしました') } catch (e2) { toast('コピーできませんでした') }
+    try { document.execCommand('copy'); toast('コピーしました') } catch { toast('コピーできませんでした') }
     ta.remove();
   }
 }
 
 /* ---------- joining: the code typed in the menu, or an invite URL ---------- */
-export async function openJoin(code) {
-  const body = $('#joinBody'), title = head('PRIVATE', `ROOM ${esc(spaced(code))}`);
+export async function openJoin(input) {
+  if (!CODE_RE.test(input)) return toast('部屋が見つかりません');
+  const code = String(Number(input)).padStart(6, '0');   // only digits reach the page
+  const body = $('#joinBody'), title = head('PRIVATE', `ROOM ${spaced(code)}`);
   body.innerHTML = title + '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>';
   openDlg('#joinDlg');
   let r;
   try { r = (await app.net.game({ op: 'room_peek', code })).room }
-  catch (e) { body.innerHTML = title + '<p class="err">読み込めませんでした</p>'; return }
-  if (r && r.member && r.status === 'waiting') { $('#joinDlg').close(); return enterById(code) }
-  const chips = app.prof ? app.prof.chips : 0, buy = r ? STAKES[r.stake].buyIn : 0;
-  const why = !r ? '部屋が見つかりません' : r.status === 'started' ? 'この部屋はもう始まっています' : r.status !== 'waiting' ? 'この部屋は閉じられています'
-    : r.seated >= r.seats ? '満員です' : chips < buy ? `残高 ${fmt(buy)} 以上で参加できます` : '';
-  body.innerHTML = title + (r ? `<dl class="spec"><dt>Host</dt><dd>${esc(r.host || '')}</dd><dt>Buy-in</dt><dd>${STAKE_LABEL[r.stake]} · ${fmt(buy)}</dd><dt>Players</dt><dd>${r.seated} / ${r.seats}</dd></dl>` : '') +
-    (why ? `<p class="err">${why}</p>` : '') +
+  catch { body.innerHTML = title + '<p class="err">読み込めませんでした</p>'; return }
+  if (r?.member && r.status === 'waiting') { $('#joinDlg').close(); return enterById(code) }
+  const buy = r ? STAKES[r.stake].buyIn : 0, why = joinBlocker(r, app.prof?.chips ?? 0, buy);
+  body.innerHTML = title + (r ? `<dl class="spec"><dt>Host</dt><dd>${esc(r.host || '')}</dd><dt>Buy-in</dt><dd>${STAKE_LABEL[r.stake]} · ${fmt(buy)}</dd><dt>Players</dt><dd>${fmt(r.seated)} / ${fmt(r.seats)}</dd></dl>` : '') +
+    (why ? `<p class="err">${esc(why)}</p>` : '') +
     `<div class="btns"><button class="btn ghost" data-close type="button">Cancel</button><button class="btn primary" id="joinGo" type="button" ${why ? 'disabled' : ''}>Join</button></div>`;
   const go = $('#joinGo');
   go.onclick = async () => {
@@ -147,14 +157,23 @@ export async function openJoin(code) {
     catch (e) { go.disabled = false; $('#joinDlg').close(); showRoomError(e) }
   };
 }
+// why the room of room_peek cannot be joined ('' = it can)
+function joinBlocker(r, chips, buy) {
+  if (!r) return '部屋が見つかりません';
+  if (r.status === 'started') return 'この部屋はもう始まっています';
+  if (r.status !== 'waiting') return 'この部屋は閉じられています';
+  if (r.seated >= r.seats) return '満員です';
+  if (chips < buy) return `残高 ${fmt(buy)} 以上で参加できます`;
+  return '';
+}
 // already a member of the room with this code (e.g. opened the invite again): join is idempotent and answers the room
 async function enterById(code) {
   try { const x = await app.net.game({ op: 'room_join', code }); enter(x.room.id, x) } catch (e) { showRoomError(e) }
 }
 
 export function showRoomError(e) {
-  const code = e && e.code;
-  if (code === 'in_game') { app.nav.refreshMe(); return toast('進行中の卓があります') }
+  const code = e?.code;
+  if (code === 'in_game') { void app.nav.refreshMe(); return toast('進行中の卓があります') }
   toast({ room_full: '満員です', room_closed: 'この部屋には参加できません', not_found: '部屋が見つかりません', insufficient_chips: '残高が足りません',
     busy: '混み合っています。もう一度' }[code] || '通信エラー。もう一度');
 }

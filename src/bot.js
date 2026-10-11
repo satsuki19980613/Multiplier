@@ -20,7 +20,7 @@ export const PERSONA_PARAMS = {
 function quirkOf(name) {
   let h = 2166136261;
   const s = String(name || '');
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  for (let i = 0; i < s.length; i++) { h ^= s.codePointAt(i); h = Math.imul(h, 16777619); }
   return ((h >>> 0) % 2001) / 1000 - 1;
 }
 
@@ -31,7 +31,7 @@ function legalFallback(L) {
 
 // make sure the move is legal; repair if not
 function sanitize(move, L) {
-  if (!move || !move.type) return legalFallback(L);
+  if (!move?.type) return legalFallback(L);
   switch (move.type) {
     case 'fold': return L.canCheck ? { type: 'check' } : { type: 'fold' };
     case 'check': return L.canCheck ? { type: 'check' } : { type: 'fold' };
@@ -52,12 +52,12 @@ export function botMove(view, seat, { persona = 'tight', rnd = Math.random } = {
   const L = S.L;
   try {
     const base = PERSONA_PARAMS[persona] || PERSONA_PARAMS.tight;
-    const P = { ...base, quirk: quirkOf(S.names && S.names[seat]) };
+    const P = { ...base, quirk: quirkOf(S.names?.[seat]) };
     const rng = makeLocalRng(rnd);
     const move = S.street === 'preflop' ? preflopMove(S, P, rnd, rng) : postflopMove(S, P, rnd, rng);
     return sanitize(move, L);
   } catch (e) {
-    if (typeof process !== 'undefined' && process.env && process.env.BOT_DEBUG) throw e;
+    if (typeof process !== 'undefined' && process.env?.BOT_DEBUG) throw e;
     return legalFallback(L);
   }
 }

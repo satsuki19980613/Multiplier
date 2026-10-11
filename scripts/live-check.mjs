@@ -5,11 +5,15 @@
 // security headers. That notice is also what Mozilla HTTP Observatory sees.
 import{appendFileSync}from'node:fs';
 
-const env=n=>{const v=process.env[n];if(!v){console.error(`環境変数 ${n} が必要です`);process.exit(2)}return v.replace(/\/+$/,'')};
+const trimSlash=v=>{let e=v.length;while(e>0&&v[e-1]==='/'){e--}return v.slice(0,e)};
+const env=n=>{const v=process.env[n];if(!v){console.error(`環境変数 ${n} が必要です`);process.exit(2)}return trimSlash(v)};
+// what the servers answered goes to the log as one line: control characters (newlines included) become spaces
+const logSafe=v=>String(v).replaceAll(/\p{Cc}+/gu,' ');
 const results=[];let failed=0;
 function check(name,ok,detail=''){
   results.push({name,ok,detail});if(!ok)failed++;
-  console.log(`${ok?'ok  ':'NG  '} ${name}${detail?` — ${detail}`:''}`);
+  const tail=detail?' — '+logSafe(detail):'';
+  console.log(`${ok?'ok  ':'NG  '} ${logSafe(name)}${tail}`);
 }
 async function get(url,init={}){
   const r=await fetch(url,{redirect:'manual',...init});
@@ -42,7 +46,7 @@ async function prod(){
   check('Permissions-Policy',h('permissions-policy')!=='',h('permissions-policy'));
   check('Cookie を出さない',top.headers.getSetCookie().length===0);
   const http=await get(SITE.replace(/^https:/,'http:')+'/');
-  check('http は https へ転送される',http.status>=300&&http.status<400&&/^https:/.test(http.headers.get('location')||''),`${http.status} ${http.headers.get('location')}`);
+  check('http は https へ転送される',http.status>=300&&http.status<400&&(http.headers.get('location')||'').startsWith('https:'),`${http.status} ${http.headers.get('location')}`);
   const auth=await get(SITE+'/api/auth/ok');
   check('ログイン中継 /api/auth も日本国外は 403',auth.status===403,`${auth.status}`);
 
@@ -63,10 +67,9 @@ async function prod(){
   check('Data API はトークン無しを断る（4xx）',d0.status>=400&&d0.status<500,`${d0.status} ${d0.body.slice(0,160)}`);
   const d1=await get(DATA+'/rpc/me',{method:'POST',headers:{Origin:SITE,'Content-Type':'application/json',Authorization:FAKE_JWT},body:'{}'});
   check('Data API は偽のトークンを断る（4xx）',d1.status>=400&&d1.status<500,`${d1.status} ${d1.body.slice(0,160)}`);
-  for(const t of['profiles','games','queue','rooms','seasons','hall_of_fame']){
-    const r=await get(`${DATA}/${t}?select=*&limit=1`,{headers:{Origin:SITE}});
-    check(`Data API で表 ${t} を直接読めない`,r.status>=400,`${r.status} ${r.body.slice(0,100)}`);
-  }
+  const tables=['profiles','games','queue','rooms','seasons','hall_of_fame'];
+  const reads=await Promise.all(tables.map(t=>get(`${DATA}/${t}?select=*&limit=1`,{headers:{Origin:SITE}})));
+  reads.forEach((r,i)=>check(`Data API で表 ${tables[i]} を直接読めない`,r.status>=400,`${r.status} ${r.body.slice(0,100)}`));
   summary('本番の通信確認（日本国外から・読み取りだけ）');
 }
 
