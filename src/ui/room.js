@@ -4,6 +4,7 @@ import { STAKES } from '../spin.js';
 import { ROOM_POLL_MS, CODE_RE } from '../../server/game/rooms.js';
 import { $, app, esc, fmt, head, openDlg, toast, clock, sessGet, sessSet, STAKE_LABEL } from './util.js';
 import { paint, setPane } from './menu.js';
+import { getFx } from './gif.js';
 
 const LOBBY_KEY = 'mp-lobby';   // the room being waited in, to come back after a reload (sessionStorage)
 let R = null;                   // { id, v, timer, ui, busy }
@@ -152,7 +153,7 @@ export async function openJoin(input) {
   const go = $('#joinGo');
   go.onclick = async () => {
     go.disabled = true;
-    try { const x = await app.net.game({ op: 'room_join', code }); $('#joinDlg').close(); enter(x.room.id, x) }
+    try { const x = await app.net.game({ op: 'room_join', code, fx: getFx() }); $('#joinDlg').close(); enter(x.room.id, x) }
     catch (e) { go.disabled = false; $('#joinDlg').close(); showRoomError(e) }
   };
 }

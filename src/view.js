@@ -2,11 +2,15 @@
 // Spec: docs/ARCHITECTURE.md §4.
 
 // Copy of the state without the deck and the RNG key/counter; the hole cards of the other seats become null.
-// lastHand.shown (hands that reached showdown) is kept as is. `seat` null/undefined = a spectator who sees no hole cards.
+// lastHand.shown (hands that reached showdown) is kept as is; lastHand.hole (and prevHands[].hole) keeps the seat's own cards and the shown ones.
+// `seat` null/undefined = a spectator who sees no hole cards.
 export function viewFor(g, seat) {
   const { deck, seed, ctr, holes, ...rest } = g;
   const v = structuredClone(rest);
   v.holes = holes.map((h, i) => (i === seat && h ? h.slice() : null));
+  for (const lh of [v.lastHand, ...(v.prevHands || [])]) {
+    if (lh && lh.hole) lh.hole = lh.hole.map((h, i) => (h && (i === seat || (lh.shown && lh.shown[i])) ? h : null));
+  }
   return v;
 }
 

@@ -6,7 +6,12 @@ export const MAX_BODY=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // MoveError code -> HTTP status (anything else is 422)
 export const STATUS={not_found:404,no_profile:403,gone:409,stale:409,not_yet:409,game_over:409,already_out:409,not_your_turn:409,busy:409,
-  insufficient_chips:409,freeroll_unavailable:409,in_game:409,room_closed:409,room_full:409,not_host:409,not_enough:409,away:409,illegal:422};
+  insufficient_chips:409,freeroll_unavailable:409,in_game:409,room_closed:409,room_full:409,not_host:409,not_enough:409,away:409,
+  chat_closed:409,chat_full:409,too_fast:429,malformed:422,illegal:422};
+// ops on the caller's game that take only { game }
+const GAME_OPS={retire:'retire',tick:'tick',sitout:'sitout',sitin:'sitin',stay:'stay',depart:'depart',rematch:'rematch'};
+// fx: a KLIPY slug, or null / missing (the value itself is normalised by the rules; only the type is checked here)
+const fxOk=x=>x==null||(typeof x==='string'&&x.length<=200);
 
 const isUuid=x=>typeof x==='string'&&UUID.test(x);
 // op -> [is the body well-formed?, call deps]
@@ -14,11 +19,12 @@ const OPS=new Map(Object.entries({
   queue:[b=>STAKE_KEYS.includes(b.stake),(d,uid,b)=>d.queue(uid,b.stake)],
   leave:[()=>true,(d,uid)=>d.leave(uid)],
   act:[b=>isUuid(b.game)&&Number.isInteger(b.ver)&&b.move&&typeof b.move==='object',(d,uid,b)=>d.act(uid,b.game,{ver:b.ver,move:b.move})],
-  retire:[b=>isUuid(b.game),(d,uid,b)=>d.retire(uid,b.game)],
-  tick:[b=>isUuid(b.game),(d,uid,b)=>d.tick(uid,b.game)],
-  room_create:[b=>ROOM_STAKES.includes(b.stake),(d,uid,b)=>d.roomCreate(uid,b.stake)],
+  ...Object.fromEntries(Object.entries(GAME_OPS).map(([op,fn])=>[op,[b=>isUuid(b.game),(d,uid,b)=>d[fn](uid,b.game)]])),
+  fx:[b=>isUuid(b.game)&&fxOk(b.fx),(d,uid,b)=>d.fx(uid,b.game,b.fx??null)],
+  chat:[b=>isUuid(b.game)&&typeof b.text==='string'&&b.text.length<=400,(d,uid,b)=>d.chat(uid,b.game,b.text)],
+  room_create:[b=>ROOM_STAKES.includes(b.stake)&&fxOk(b.fx),(d,uid,b)=>d.roomCreate(uid,b.stake,b.fx??null)],
   room_peek:[b=>typeof b.code==='string'&&CODE_RE.test(b.code),(d,uid,b)=>d.roomPeek(uid,b.code)],
-  room_join:[b=>typeof b.code==='string'&&CODE_RE.test(b.code),(d,uid,b)=>d.roomJoin(uid,b.code)],
+  room_join:[b=>typeof b.code==='string'&&CODE_RE.test(b.code)&&fxOk(b.fx),(d,uid,b)=>d.roomJoin(uid,b.code,b.fx)],
   room_wait:[b=>isUuid(b.room),(d,uid,b)=>d.roomWait(uid,b.room)],
   room_start:[b=>isUuid(b.room),(d,uid,b)=>d.roomStart(uid,b.room)],
   room_leave:[b=>isUuid(b.room),(d,uid,b)=>d.roomLeave(uid,b.room)],

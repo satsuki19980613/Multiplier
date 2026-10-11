@@ -3,7 +3,7 @@
 import{readdirSync,readFileSync}from'node:fs';
 import{resolve}from'node:path';
 import pg from'pg';
-import{ROOT,branchArg,connectionString}from'./neon.mjs';
+import{ROOT,branchArg,connectionString,neon}from'./neon.mjs';
 
 const cmd=process.argv[2];
 if(cmd!=='migrate'){console.error('usage: node scripts/db.mjs migrate --branch <branch>');process.exit(2)}
@@ -23,3 +23,7 @@ try{
   }
   console.log(n?`${n} 件を適用しました（${branch}）。`:`未適用のマイグレーションはありません（${branch}）。`);
 }finally{await client.end()}
+// the Data API caches the schema: new or changed RPC functions are visible only after a refresh (always run: harmless, and a re-run fixes a
+// refresh that failed after the migrations went in)
+await neon('data-api','refresh-schema','--branch',branch);
+console.log(`Data API のスキーマを読み直しました（${branch}）。`);
