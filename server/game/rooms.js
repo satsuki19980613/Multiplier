@@ -3,9 +3,10 @@
 // start it and the empty seat goes to a bot. Buy-in and prize are the same as PLAY (the balance moves).
 // Pure functions only (no I/O, `now` / `rnd` come in) so fakeNet can run them in the browser. docs/ARCHITECTURE.md §6.
 //
-// room = { id, code, stake, host: uid, members: [{ uid, name, seenAt }] (join order, the host first),
+// room = { id, code, stake, host: uid, members: [{ uid, name, seenAt, fx }] (join order, the host first; fx = the member's winner GIF slug | null),
 //          status: 'waiting' | 'started' | 'closed', game: id | null, createdAt }
 import{MoveError,STAKE_KEYS}from'./rules.js';
+import{normalizeFx}from'../../src/fx.js';
 
 export const ROOM_SEATS=3,ROOM_MIN_START=2;
 /** The lobby polls every ROOM_POLL_MS. A member whose last poll is older than ROOM_AWAY_MS is away (e.g. sharing the invite in another
@@ -21,9 +22,9 @@ export const ROOM_STAKES=STAKE_KEYS.filter(k=>k!=='free');
 /** a random 6-digit room code ('000000'..'999999') */
 export const genCode=rnd=>String(Math.floor(rnd()*1e6)%1e6).padStart(6,'0');
 
-export function newRoom({id,code,stake,uid,name,now}){
+export function newRoom({id,code,stake,uid,name,now,fx=null}){
   if(!ROOM_STAKES.includes(stake))throw new MoveError('illegal');
-  return{id,code,stake,host:uid,members:[{uid,name,seenAt:now}],status:'waiting',game:null,createdAt:now};
+  return{id,code,stake,host:uid,members:[{uid,name,seenAt:now,fx:normalizeFx(fx)}],status:'waiting',game:null,createdAt:now};
 }
 
 const clone=x=>structuredClone(x);
@@ -42,16 +43,19 @@ export function prune(room,now){
   return r;
 }
 
-/** Join (or, already a member, just refresh). Throws room_closed | room_full. Returns a new room. */
-export function joinRoom(room,uid,name,now){
+/** Join (or, already a member, just refresh). fx = the member's winner GIF (undefined keeps it). Throws room_closed | room_full. Returns a new room. */
+export function joinRoom(room,uid,name,now,fx){
   const r=prune(room,now);
   if(r.status!=='waiting')throw new MoveError('room_closed');
   const m=r.members.find(x=>x.uid===uid);
-  if(m){m.seenAt=now;m.name=name;return r}
+  if(m){m.seenAt=now;m.name=name;if(fx!==undefined)m.fx=normalizeFx(fx);return r}
   if(r.members.length>=ROOM_SEATS)throw new MoveError('room_full');
-  r.members.push({uid,name,seenAt:now});
+  r.members.push({uid,name,seenAt:now,fx:normalizeFx(fx??null)});
   return r;
 }
+
+/** the humans of the table a room starts: [{ uid, name, fx, host }] (names from `nameOf(uid)`, e.g. the current nicknames) */
+export const roomHumans=(room,nameOf=null)=>room.members.map(m=>({uid:m.uid,name:nameOf?nameOf(m.uid):m.name,fx:m.fx??null,host:m.uid===room.host}));
 
 /** A member's poll in the lobby. Throws not_found when the caller is no longer in the room (left, dropped, or the room closed
  *  before they were seated). A started room answers its members as is. Returns a new room. */

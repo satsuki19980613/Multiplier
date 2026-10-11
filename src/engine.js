@@ -123,7 +123,8 @@ export function newGame({ stack, levelMs, now = 0, rnd, names, stacks, button } 
     button: 0, handNo: 0, seed, ctr: 0, deck: [], holes: [null, null, null], board: [], street: 'preflop', toAct: null,
     bet: [0, 0, 0], total: [0, 0, 0], folded: [false, false, false], allIn: [false, false, false],
     currentBet: 0, minRaise: BLINDS[0][1], handStart: st.slice(), seen: [null, null, null], needAct: [false, false, false],
-    lastHand: null, places: [null, null, null], over: false, winner: null, log: [], forfeited: 0,
+    sbSeat: null, bbSeat: 0, actions: [], runFrom: null,
+    lastHand: null, prevHands: [], places: [null, null, null], over: false, winner: null, log: [], forfeited: 0,
   };
   let b = button;
   if (b == null) { const s = stream(g); b = s.below(3); s.done(); }
@@ -155,11 +156,12 @@ function dealHand(g, now, firstButton) {
   g.bet = [0, 0, 0]; g.total = [0, 0, 0];
   g.folded = SEATS.map(i => g.seats[i].out); g.allIn = [false, false, false];
   g.handStart = g.seats.map(s => s.stack);
-  g.seen = [null, null, null];
+  g.seen = [null, null, null]; g.actions = []; g.runFrom = null;
   const order = []; for (let k = 1; k <= 3; k++) { const s = (button + k) % 3; if (!g.seats[s].out) order.push(s); }
   for (const s of order) g.holes[s] = [g.deck.pop(), g.deck.pop()];
   const sbSeat = alive.length === 2 ? button : nextAlive(g, button);
   const bbSeat = nextAlive(g, sbSeat);
+  g.sbSeat = sbSeat; g.bbSeat = bbSeat;
   post(g, sbSeat, g.sb, 'SB'); post(g, bbSeat, g.bb, 'BB');
   g.currentBet = g.bb; g.minRaise = g.bb;
   g.needAct = SEATS.map(i => !g.folded[i] && !g.allIn[i]);
@@ -197,6 +199,8 @@ function progress(g, now, from) {
     if (SEATS.filter(i => !g.folded[i]).length < 2) return finishHand(g, now);
     const a = findActor(g, from);
     if (a >= 0) { g.toAct = a; return; }
+    // nobody (or only one seat) can still bet: the hole cards go face up here and the rest of the board is dealt (the screen runs it out from here)
+    if (g.runFrom == null && SEATS.filter(i => !g.folded[i] && !g.allIn[i]).length <= 1) g.runFrom = g.board.length;
     if (g.street === 'river') return finishHand(g, now);
     nextStreet(g); from = g.button;
   }
@@ -220,7 +224,14 @@ export function legalActions(g) {
   };
 }
 
-export function applyAction(g, seat, move, now) {
+// One record per action of the hand in g.actions (blinds are not actions): { seat, kind, betTo, put, auto, street }.
+// kind: 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'allin' (any action that puts the seat's last chip in); betTo: the seat's total for the
+// street after it (fold / check: the bet faced); put: chips added; auto: a substitute move (time-out, retire); street: 0 preflop … 3 river.
+const STREET_NO = { preflop: 0, flop: 1, turn: 2, river: 3 };
+function record(g, seat, kind, betTo, put, auto) { (g.actions ||= []).push({ seat, kind, betTo, put, auto: !!auto, street: STREET_NO[g.street] }); }
+
+// auto = a substitute move (autoAction): only marks the record
+export function applyAction(g, seat, move, now, auto = false) {
   if (g.over) throw new EngineError('game_over');
   if (g.toAct !== seat) throw new EngineError('not_your_turn');
   const L = legalActions(g), type = move && move.type;
@@ -228,10 +239,12 @@ export function applyAction(g, seat, move, now) {
   const st = g.seats[seat];
   if (type === 'fold') {
     g.folded[seat] = true; g.needAct[seat] = false;
+    record(g, seat, 'fold', g.currentBet, 0, auto);
     log(g, `{${seat}} folds`);
   } else if (type === 'check') {
     if (!L.canCheck) throw bad('cannot check');
     g.needAct[seat] = false; g.seen[seat] = g.currentBet;
+    record(g, seat, 'check', g.currentBet, 0, auto);
     log(g, `{${seat}} checks`);
   } else if (type === 'call') {
     if (!L.canCall) throw bad('nothing to call');
@@ -239,6 +252,7 @@ export function applyAction(g, seat, move, now) {
     st.stack -= pay; g.bet[seat] += pay; g.total[seat] += pay;
     if (st.stack === 0) g.allIn[seat] = true;
     g.needAct[seat] = false; g.seen[seat] = g.currentBet;
+    record(g, seat, g.allIn[seat] ? 'allin' : 'call', g.bet[seat], pay, auto);
     log(g, `{${seat}} calls ${pay}${g.allIn[seat] ? ' (all-in)' : ''}`);
   } else if (type === 'raise') {
     const to = move.to;
@@ -250,6 +264,7 @@ export function applyAction(g, seat, move, now) {
     if (to - prev >= g.minRaise) g.minRaise = to - prev;   // a full raise; an incomplete all-in leaves the minimum untouched
     g.currentBet = to; g.seen[seat] = to; g.needAct[seat] = false;
     for (const o of SEATS) if (o !== seat && !g.folded[o] && !g.allIn[o]) g.needAct[o] = true;
+    record(g, seat, g.allIn[seat] ? 'allin' : open ? 'bet' : 'raise', to, add, auto);
     log(g, `{${seat}} ${open ? 'bets' : 'raises to'} ${to}${g.allIn[seat] ? ' (all-in)' : ''}`);
   } else throw bad('unknown move');
   g.ver++;
@@ -260,7 +275,7 @@ export function applyAction(g, seat, move, now) {
 export function autoAction(g, seat, now) {
   if (g.over) throw new EngineError('game_over');
   if (g.toAct !== seat) throw new EngineError('not_your_turn');
-  return applyAction(g, seat, { type: legalActions(g).canCheck ? 'check' : 'fold' }, now);
+  return applyAction(g, seat, { type: legalActions(g).canCheck ? 'check' : 'fold' }, now, true);
 }
 
 /* ---------------- retiring ---------------- */
@@ -272,6 +287,7 @@ export function forfeit(g, seat, now) {
   if (!SEATS.includes(seat) || g.seats[seat].out) throw new EngineError('illegal', 'seat is already out');
   const st = g.seats[seat], inHand = !g.folded[seat], wasTurn = g.toAct === seat, turn = g.toAct;
   log(g, `{${seat}} retires`);
+  if (inHand) record(g, seat, 'fold', g.currentBet, 0, true);
   g.folded[seat] = true; g.needAct[seat] = false;
   g.forfeited = (g.forfeited || 0) + st.stack; st.stack = 0;
   g.places[seat] = SEATS.filter(s => !g.seats[s].out).length;   // 3rd if all three were alive, 2nd when heads-up
@@ -293,7 +309,7 @@ export function forfeit(g, seat, now) {
 
 /* ---------------- end of hand ---------------- */
 function finishHand(g, now) {
-  const start = g.handStart, alive = SEATS.filter(i => !g.folded[i]);
+  const start = g.handStart, alive = SEATS.filter(i => !g.folded[i]), commits = g.total.slice();
   // uncalled part of the biggest contribution goes back to its owner (only a seat still in the hand: chips of a folded or retired seat stay in the pot)
   let uncalled = null;
   const top = alive.slice().sort((a, b) => g.total[b] - g.total[a])[0];
@@ -338,13 +354,26 @@ function finishHand(g, now) {
   for (const s of SEATS) g.seats[s].stack += win[s];
   const net = SEATS.map(s => g.seats[s].stack - start[s]);
   const busted = SEATS.filter(s => !g.seats[s].out && g.seats[s].stack === 0);
-  g.lastHand = { handNo: g.handNo, board: g.board.slice(), shown, pots, names, net, busted, endedAt: now, uncalled };
+  // the finished hand as the screen and the hand history need it. hole: everybody's cards (viewFor keeps only the seat's own and the shown ones);
+  // commits: chips put in (before the uncalled part went back); won: chips taken from the table (the uncalled part included, so net = won - commits,
+  // except for a seat that retired during the hand: its net also has the forfeited stack); runFrom: board size when the cards went face up
+  // (null when the hand ended with a fold); retired: the seats that retired during the hand (already out, but not in eliminated).
+  // prevHands keeps the four hands before it: with short stacks the next hands can be all-in from the blinds and finish in the same step
+  // (a short stack that keeps winning can chain several), and the screen / the hand history must still see every hand
+  if (g.lastHand) g.prevHands = [...(g.prevHands || []), g.lastHand].slice(-4);
+  g.lastHand = {
+    handNo: g.handNo, board: g.board.slice(), shown, pots, names, net, busted, endedAt: now, uncalled,
+    startedAt: g.handAt, level: g.level, sb: g.sb, bb: g.bb, btn: g.button, sbSeat: g.sbSeat, bbSeat: g.bbSeat,
+    start: start.slice(), commits, won: SEATS.map(s => win[s] + (uncalled && uncalled.seat === s ? uncalled.amount : 0)),
+    hole: g.holes.map(h => (h ? h.slice() : null)), folded: g.folded.slice(), allIn: g.allIn.slice(), actions: (g.actions || []).map(a => ({ ...a })),
+    runFrom: showdown ? g.runFrom ?? g.board.length : null, eliminated: [], retired: SEATS.filter(s => start[s] > 0 && g.seats[s].out),
+  };
   g.total = [0, 0, 0]; g.bet = [0, 0, 0]; g.currentBet = 0; g.needAct = [false, false, false]; g.toAct = null;
   // eliminations: a bigger starting stack ranks higher; equal stacks: the lower seat number ranks higher
   const left = SEATS.filter(s => !g.seats[s].out).length;
   busted.sort((a, b) => start[a] - start[b] || b - a);
   busted.forEach((s, i) => {
-    g.seats[s].out = true; g.places[s] = left - i;
+    g.seats[s].out = true; g.places[s] = left - i; g.lastHand.eliminated.push({ seat: s, place: left - i });
     log(g, `{${s}} is eliminated (place ${left - i})`);
   });
   const survivors = SEATS.filter(s => !g.seats[s].out);
