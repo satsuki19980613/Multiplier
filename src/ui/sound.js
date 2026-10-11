@@ -1,6 +1,8 @@
 // Synthesized sound for the multiplier reveal (Web Audio API only: no audio files). Moderate volume, default ON, the header
 // toggle (#soundToggle) persists in localStorage. The AudioContext is only created after a user gesture (first tap / key anywhere,
 // so the PLAY / stake tap counts). Every function is a safe no-op when sound is off or unavailable.
+import { secureRnd } from '../rnd.js';
+
 const KEY = 'mp-sound';
 let on = true;
 try { on = localStorage.getItem(KEY) !== '0' } catch (e) { /* private mode: stay on */ }
@@ -20,17 +22,24 @@ function ensure() {
     master = ctx.createGain(); master.gain.value = .6;
     master.connect(comp); comp.connect(ctx.destination);
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
-    const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = secureRnd() * 2 - 1;
     // iOS: a silent buffer inside the gesture unlocks output
     const s = ctx.createBufferSource(); s.buffer = ctx.createBuffer(1, 1, 22050); s.connect(ctx.destination); s.start(0);
-  } catch (e) { ctx = null }
+  } catch (e) { ctx = null /* no audio here: every call below stays a no-op */ }
   return ctx;
 }
 /** call from a user gesture (it is also hooked to the first tap / key automatically) */
-export function unlock() { if (!on) return; if (ensure() && ctx.state !== 'running') ctx.resume().catch(() => {}) }
-const ready = () => { if (!on || !ensure()) return false; if (ctx.state !== 'running') ctx.resume().catch(() => {}); return true };
+export function unlock() {
+  if (!on) return;
+  if (ensure() && ctx.state !== 'running') ctx.resume().catch(() => {});
+}
+const ready = () => {
+  if (!on || !ensure()) return false;
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  return true;
+};
 export const resume = () => { ready() };
-['pointerdown', 'touchend', 'keydown'].forEach(ev => addEventListener(ev, () => { if (!ctx || ctx.state !== 'running') unlock() }, { capture: true, passive: true }));
+['pointerdown', 'touchend', 'keydown'].forEach(ev => addEventListener(ev, () => { if (ctx?.state !== 'running') unlock() }, { capture: true, passive: true }));
 
 /* ---------- primitives ---------- */
 function tone({ f = 440, f2 = 0, type = 'sine', t = 0, a = .004, d = .2, v = .2, lp = 0 }) {
@@ -47,7 +56,7 @@ function noise({ t = 0, a = .003, d = .2, v = .2, type = 'lowpass', f = 1200, f2
   s.buffer = noiseBuf; s.loop = true; b.type = type; b.Q.value = q; b.frequency.setValueAtTime(f, t0);
   if (f2) b.frequency.exponentialRampToValueAtTime(f2, t0 + a + d);
   g.gain.setValueAtTime(.0001, t0); g.gain.exponentialRampToValueAtTime(v, t0 + a); g.gain.exponentialRampToValueAtTime(.0001, t0 + a + d);
-  s.connect(b); b.connect(g); g.connect(master); s.start(t0, Math.random() * .5); s.stop(t0 + a + d + .05);
+  s.connect(b); b.connect(g); g.connect(master); s.start(t0, secureRnd() * .5); s.stop(t0 + a + d + .05);
 }
 const NOTE = { C4: 261.6, E4: 329.6, G4: 392, C5: 523.3, D5: 587.3, E5: 659.3, G5: 784, A5: 880, C6: 1046.5, D6: 1174.7, E6: 1318.5, G6: 1568 };
 
@@ -55,7 +64,9 @@ const NOTE = { C4: 261.6, E4: 329.6, G4: 392, C5: 523.3, D5: 587.3, E5: 659.3, G
 /** a ratchet click. s = reel speed 0..1 (fast = light and short, slow = heavier and lower: the "will it stop?" tension) */
 export function tick(s = .5) {
   if (!ready()) return;
-  const now = ctx.currentTime; if (now - lastTick < .03) return; lastTick = now;
+  const now = ctx.currentTime;
+  if (now - lastTick < .03) return;
+  lastTick = now;
   const slow = 1 - Math.min(1, Math.max(0, s));
   tone({ f: 760 + s * 1100, f2: 300 + s * 300, type: 'square', d: .018 + slow * .045, v: .045 + slow * .07, lp: 2600 });
   noise({ d: .012, v: .05 + slow * .05, type: 'bandpass', f: 2400, q: 1.5 });
@@ -64,7 +75,9 @@ export function tick(s = .5) {
 export function thunk(t = 0) {
   if (!ready()) return;
   const big = t >= 2;
-  tone({ f: 190, f2: 48, d: big ? .2 : .13, v: big ? .75 : t ? .5 : .38 });
+  let v = .38;
+  if (big) v = .75; else if (t) v = .5;
+  tone({ f: 190, f2: 48, d: big ? .2 : .13, v });
   noise({ d: .045, v: big ? .32 : .2, f: 3000 });
   if (big) noise({ d: .38, v: t >= 3 ? .45 : .28, f: 2200, f2: 120, a: .005 });
 }
@@ -79,13 +92,15 @@ export function drone(t = 2) {
   let dead = false;
   return {
     set(s) {
-      if (dead || !ctx) return; if (!on) { g.gain.setTargetAtTime(0, ctx.currentTime, .05); return }
+      if (dead || !ctx) return;
+      if (!on) { g.gain.setTargetAtTime(0, ctx.currentTime, .05); return }
       const n = ctx.currentTime, f = 55 + s * 170;
       o.frequency.setTargetAtTime(f, n, .06); o2.frequency.setTargetAtTime(f * 1.005 * 2, n, .06);
       b.frequency.setTargetAtTime(280 + s * 900, n, .08); g.gain.setTargetAtTime(top * (.25 + .75 * s), n, .08);
     },
     stop(fast) {
-      if (dead) return; dead = true;
+      if (dead) return;
+      dead = true;
       const n = ctx.currentTime; g.gain.cancelScheduledValues(n); g.gain.setTargetAtTime(0, n, fast ? .015 : .12);
       o.stop(n + .5); o2.stop(n + .5);
     },
@@ -135,7 +150,7 @@ export function stinger(t = 0, beat = 0) {
 }
 
 /** vibration (tier 1+ stops where supported); follows the sound toggle */
-export function haptic(p) { if (on && p && p.length && navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) { try { navigator.vibrate(p) } catch (e) { /* unsupported */ } } }
+export function haptic(p) { if (on && p?.length && navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) { try { navigator.vibrate(p) } catch (e) { /* unsupported */ } } }
 
 /* ---------- header toggle ---------- */
 function bind() {

@@ -12,10 +12,11 @@
 import { MULTIPLIERS, STAKES } from '../spin.js';
 import { $, REDUCE, fmt, STAKE_LABEL } from './util.js';
 import * as snd from './sound.js';
+import { secureRnd as rnd } from '../rnd.js';
 
-const tier = m => m >= 1000 ? 4 : m >= 100 ? 3 : m >= 10 ? 2 : m >= 4 ? 1 : 0;
+const tier = m => [4, 10, 100, 1000].filter(x => m >= x).length;   // x4+ t1, x10+ t2, x100+ t3, x1000+ t4
 const CELL = 96;   // the motion profiles below are in "cells"; one cell = one segment of the wheel
-const lerp = (a, b, k) => a + (b - a) * k, clamp01 = k => k < 0 ? 0 : k > 1 ? 1 : k;
+const lerp = (a, b, k) => a + (b - a) * k, clamp01 = k => Math.min(1, Math.max(0, k));
 const E = { in2: k => k * k, lin: k => k, out: p => k => 1 - Math.pow(1 - k, p) };
 // reel motion per tier: segments of { ms, d: px (relative weights), e: easing }. Speeds join up (2d/ms for ease-in, p*d/ms for ease-out).
 const PROFILE = [
@@ -29,6 +30,15 @@ const OVER = [14, 8, 0, 0, 0], SETTLE = [170, 210, 0, 0, 0];          // detent 
 const AFTER = [1000, 1700, 2100, 2900, 2960];                          // ms from the stop to the end of the reveal
 const COUNT = [420, 750, 1000, 1700, 1900], BOOM = [0, 0, 0, 160, 160]; // prize roll-up; the hard-cut pause before the boom
 const FREE_MS = { reveal: 600, count: 500, hold: 1500 };
+const TC = ['var(--ink)', 'var(--you-text)', '#FE7A47', '#FE7A47', '#FE7A47'], PW = [0, 0, 2, 2.4, 2.4]; // result colour; roll-up ease-in power (0 = ease-out)
+const HAPTIC = [[], [18], [30, 40, 30], [60, 50, 60, 50, 140], [60, 50, 60, 50, 60, 50, 200]];
+// the stamp of the multiplier, per tier (t4 = t3)
+const STAMP = [
+  [{ transform: 'scale(.7)', opacity: 0 }, { transform: 'scale(1.04)', opacity: 1, offset: .6 }, { transform: 'scale(1)', opacity: 1 }],
+  [{ transform: 'scale(.55)', opacity: 0 }, { transform: 'scale(1.08)', opacity: 1, offset: .6 }, { transform: 'scale(1)', opacity: 1 }],
+  [{ transform: 'scale(1.9)', opacity: 0 }, { transform: 'scale(.93)', opacity: 1, offset: .4 }, { transform: 'scale(1.03)', offset: .7 }, { transform: 'scale(1)', opacity: 1 }],
+  [{ transform: 'scale(3.4)', opacity: 0, filter: 'blur(14px)' }, { transform: 'scale(.9)', opacity: 1, filter: 'blur(0)', offset: .3 }, { transform: 'scale(1.05)', offset: .55 }, { transform: 'scale(1)', opacity: 1, filter: 'blur(0)' }],
+];
 
 /* ---------- the wheel (SVG, viewBox -200..200, pointer at the top = -90°; colours come from the theme via CSS classes) ---------- */
 // rare multipliers (x4 and up) on the even segments, largest first clockwise; x3 / x2 alternate on the odd ones
@@ -66,6 +76,7 @@ const wheelFront = () => `<svg class="w-front" viewBox="-200 -200 400 400">
 
 /* ---------- sparks / embers on a canvas ---------- */
 const WARM = ['#FE7A47', '#FF9F73', '#FFD2B8', '#ffffff'], COOL = ['#7DB4CF', '#5FA3C6', '#BFE3F5', '#ffffff'], ALL = [...WARM, ...COOL];
+const pick = a => a[Math.floor(rnd() * a.length)];
 function makeFx(canvas, host) {
   const c = canvas.getContext('2d'); if (!c) return null;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -75,7 +86,7 @@ function makeFx(canvas, host) {
     if (dead) return;
     const dt = Math.min(.05, (now - last) / 1000 || .016); last = now;
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, hr.width, hr.height); c.globalCompositeOperation = 'lighter';
-    if (emit) { emit.acc += dt * emit.rate; while (emit.acc >= 1) { emit.acc--; parts.push({ x: emit.x + (Math.random() - .5) * emit.w, y: emit.y + (Math.random() - .5) * 40, vx: (Math.random() - .5) * 40, vy: -30 - Math.random() * 90, g: -8, drag: .6, life: 1.2 + Math.random() * 1.2, max: 2.4, size: 1.5 + Math.random() * 1.8, color: emit.colors[(Math.random() * emit.colors.length) | 0], dot: true }) } }
+    if (emit) { emit.acc += dt * emit.rate; while (emit.acc >= 1) { emit.acc--; parts.push({ x: emit.x + (rnd() - .5) * emit.w, y: emit.y + (rnd() - .5) * 40, vx: (rnd() - .5) * 40, vy: -30 - rnd() * 90, g: -8, drag: .6, life: 1.2 + rnd() * 1.2, max: 2.4, size: 1.5 + rnd() * 1.8, color: pick(emit.colors), dot: true }) } }
     for (const p of parts) {
       p.px = p.x; p.py = p.y; p.vy += p.g * dt; const dr = Math.pow(p.drag, dt); p.vx *= dr; p.vy *= dr; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
       c.globalAlpha = Math.max(0, Math.min(1, p.life / p.max * 1.6)); c.strokeStyle = c.fillStyle = p.color;
@@ -88,8 +99,8 @@ function makeFx(canvas, host) {
   return {
     burst(x, y, n, colors, [s0, s1], g = 700) {
       for (let i = 0; i < n; i++) {
-        const a = Math.random() * Math.PI * 2, s = lerp(s0, s1, Math.random() ** 1.6), life = .7 + Math.random() * .9;
-        parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - s * .25, g, drag: .16, life, max: life, size: 2 + Math.random() * 3, color: colors[(Math.random() * colors.length) | 0] });
+        const a = rnd() * Math.PI * 2, s = lerp(s0, s1, rnd() ** 1.6), life = .7 + rnd() * .9;
+        parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - s * .25, g, drag: .16, life, max: life, size: 2 + rnd() * 3, color: pick(colors) });
       }
       kick();
     },
@@ -103,19 +114,19 @@ function makeFx(canvas, host) {
 export function playWheel(info) {
   return new Promise(resolve => {
     const el = $('#wheel'), free = info.multiplier == null, m = info.multiplier, t = free ? 0 : tier(m), to = info.prize || 0;
-    const buy = (STAKES[info.stake] || {}).buyIn;
+    const buy = STAKES[info.stake]?.buyIn;
     const tok = el._tok = {};
     el.className = 'wheel t' + t;
-    el.style.setProperty('--tc', t >= 2 ? '#FE7A47' : t === 1 ? 'var(--you-text)' : 'var(--ink)');
+    el.style.setProperty('--tc', TC[t]);
 
     // ---- geometry: how far the wheel turns (degrees) so that the segment under the pointer is the server's multiplier ----
     const prof = PROFILE[t].map(s => ({ ...s })), S = prof.reduce((s, x) => s + x.ms, 0), D0 = prof.reduce((s, x) => s + x.d, 0);
     const segs = free ? [] : wheelSegments(info.stake);
     if (!free && !segs.includes(m)) segs[0] = m;
     const SEG = free ? 360 : 360 / segs.length;
-    const hits = segs.map((x, i) => x === m ? i : -1).filter(i => i >= 0), TARGET = hits[(Math.random() * hits.length) | 0] || 0;
+    const hits = segs.map((x, i) => x === m ? i : -1).filter(i => i >= 0), TARGET = hits[Math.floor(rnd() * hits.length)] || 0;
     // segment i sits at the pointer when the rotation is -i·SEG (mod 360); land a little off its centre, like a real wheel
-    const A0 = Math.random() * 360, base = D0 * SEG / CELL, land = -TARGET * SEG + (Math.random() - .5) * SEG * .5;
+    const A0 = rnd() * 360, base = D0 * SEG / CELL, land = -TARGET * SEG + (rnd() - .5) * SEG * .5;
     const D = base + ((((land - A0 - base) % 360) + 360) % 360), O = OVER[t] * SEG / CELL, sc = (D + O) / D0;
     el.hidden = false;
 
@@ -133,7 +144,7 @@ export function playWheel(info) {
     const inEl = q('.w-in'), stack = q('.w-stack'), rot = q('.w-rot'), reel = q('.w-reel'), mult = q('#wMult'), prize = q('#wPrize'), pv = q('#wPv');
     const bg = q('.w-bg'), rays = q('.w-rays'), scan = q('.w-scan'), vig = q('.w-vig'), flash = q('.w-flash'), win = q('.w-win'), ring = q('.w-ring');
     // a long multiplier (x10,000) must fit a phone: shrink the type, never wrap
-    const fit = () => { mult.style.fontSize = ''; const avail = mult.parentElement.clientWidth - 8, w = mult.offsetWidth; if (w > avail) mult.style.fontSize = (parseFloat(getComputedStyle(mult).fontSize) * avail / w) + 'px' };
+    const fit = () => { mult.style.fontSize = ''; const avail = mult.parentElement.clientWidth - 8, w = mult.offsetWidth; if (w > avail) mult.style.fontSize = (Number.parseFloat(getComputedStyle(mult).fontSize) * avail / w) + 'px' };
     fit();
     // light sources follow the real layout: rays/vignette on the reel, the glow behind the result
     const place = () => {
@@ -150,10 +161,16 @@ export function playWheel(info) {
     const kill = () => { cancelAnimationFrame(raf); reelOn = false; timers.forEach(clearTimeout); timers.length = 0; if (drone) { drone.stop(true); drone = null } if (fx) { fx.stop(); fx = null } };
 
     const finish = () => {
-      if (done) return; done = true; const lingering = fx; fx = null; if (lingering) lingering.calm(); kill(); clearTimeout(holdTimer);
+      if (done) return;
+      done = true; const lingering = fx; fx = null; lingering?.calm(); kill(); clearTimeout(holdTimer);
       document.removeEventListener('keydown', onKey);
       let closed = false;
-      const out = () => { if (closed) return; closed = true; if (lingering) lingering.stop(); if (el._tok !== tok) return resolve(); el.hidden = true; el.innerHTML = ''; el.className = 'wheel'; el.onclick = null; el.style.removeProperty('--tc'); resolve() };
+      const out = () => {
+        if (closed) return;
+        closed = true; lingering?.stop();
+        if (el._tok !== tok) return resolve();
+        el.hidden = true; el.innerHTML = ''; el.className = 'wheel'; el.onclick = null; el.style.removeProperty('--tc'); resolve();
+      };
       if (REDUCE) return out();
       el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-out' }).onfinish = out;
       setTimeout(out, 300);
@@ -164,29 +181,34 @@ export function playWheel(info) {
     const shake = (amp, ms) => {
       if (REDUCE) return;
       const n = Math.max(6, Math.round(ms / 45)), kf = [{ transform: 'translate(0,0)' }];
-      for (let i = 1; i <= n; i++) { const d = Math.pow(1 - i / n, 1.5) * amp; kf.push({ transform: `translate(${((Math.random() * 2 - 1) * d).toFixed(1)}px,${((Math.random() * 2 - 1) * d).toFixed(1)}px)` }) }
+      for (let i = 1; i <= n; i++) { const d = Math.pow(1 - i / n, 1.5) * amp; kf.push({ transform: `translate(${((rnd() * 2 - 1) * d).toFixed(1)}px,${((rnd() * 2 - 1) * d).toFixed(1)}px)` }) }
       kf.push({ transform: 'none' }); inEl.animate(kf, { duration: ms, easing: 'linear' });
     };
-    const flashAll = (color, peak, ms) => { if (REDUCE) return; flash.style.background = color; flash.animate([{ opacity: peak }, { opacity: 0 }], { duration: ms, easing: 'ease-out' }) };
-    const flashWin = peak => { if (REDUCE || !win) return; win.animate([{ opacity: peak }, { opacity: 0 }], { duration: 260, easing: 'ease-out' }) };
-    const pulseRing = (x = 3.6, ms = 520) => { if (REDUCE || !ring) return; ring.animate([{ transform: 'scale(1)', opacity: .95 }, { transform: `scale(${1 + (x - 1) * .12})`, opacity: 0 }], { duration: ms, easing: 'cubic-bezier(.1,.7,.2,1)' }) };
+    const flashAll = (color, peak, ms) => {
+      if (REDUCE) return;
+      flash.style.background = color; flash.animate([{ opacity: peak }, { opacity: 0 }], { duration: ms, easing: 'ease-out' });
+    };
+    const flashWin = peak => {
+      if (REDUCE || !win) return;
+      win.animate([{ opacity: peak }, { opacity: 0 }], { duration: 260, easing: 'ease-out' });
+    };
+    const pulseRing = (x = 3.6, ms = 520) => {
+      if (REDUCE || !ring) return;
+      ring.animate([{ transform: 'scale(1)', opacity: .95 }, { transform: `scale(${1 + (x - 1) * .12})`, opacity: 0 }], { duration: ms, easing: 'cubic-bezier(.1,.7,.2,1)' });
+    };
     const stamp = () => {
       if (REDUCE) return;
-      const kf = t >= 3 ? [{ transform: 'scale(3.4)', opacity: 0, filter: 'blur(14px)' }, { transform: 'scale(.9)', opacity: 1, filter: 'blur(0)', offset: .3 }, { transform: 'scale(1.05)', offset: .55 }, { transform: 'scale(1)', opacity: 1, filter: 'blur(0)' }]
-        : t === 2 ? [{ transform: 'scale(1.9)', opacity: 0 }, { transform: 'scale(.93)', opacity: 1, offset: .4 }, { transform: 'scale(1.03)', offset: .7 }, { transform: 'scale(1)', opacity: 1 }]
-        : t === 1 ? [{ transform: 'scale(.55)', opacity: 0 }, { transform: 'scale(1.08)', opacity: 1, offset: .6 }, { transform: 'scale(1)', opacity: 1 }]
-        : [{ transform: 'scale(.7)', opacity: 0 }, { transform: 'scale(1.04)', opacity: 1, offset: .6 }, { transform: 'scale(1)', opacity: 1 }];
-      mult.animate(kf, { duration: [260, 380, 460, 620, 620][t], easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' });
+      mult.animate(STAMP[Math.min(t, 3)], { duration: [260, 380, 460, 620, 620][t], easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'backwards' });
     };
     const rollUp = () => {
       if (!to) { pv.textContent = fmt(0); return }
-      counting = true; const ms = free ? FREE_MS.count : COUNT[t], t1 = performance.now(), pw = t >= 3 ? 2.4 : t === 2 ? 2 : 0;
+      counting = true; const ms = free ? FREE_MS.count : COUNT[t], t1 = performance.now(), pw = PW[t];
       let nextB = 0;
       const step = now => {
         if (done || !counting) return;
         const k = clamp01((now - t1) / ms), e = pw ? Math.pow(k, pw) : 1 - Math.pow(1 - k, 3);
         if (k < 1) {
-          let v = to * e; if (t >= 2 && to >= 100) v = Math.min(to - 1, Math.floor(v / 10) * 10 + ((Math.random() * 10) | 0)); // the last digit rolls
+          let v = to * e; if (t >= 2 && to >= 100) v = Math.min(to - 1, Math.floor(v / 10) * 10 + Math.floor(rnd() * 10)); // the last digit rolls
           pv.textContent = fmt(v);
           if (t >= 1 && now >= nextB) { snd.blip(k, t); nextB = now + Math.max(26, 105 - 80 * k) }
           raf2 = requestAnimationFrame(step);
@@ -204,42 +226,47 @@ export function playWheel(info) {
     const turn = p => { rot.style.transform = `rotate(${(A0 + p).toFixed(3)}deg)` };
     const showResult = () => { el.classList.add('rev'); mult.style.opacity = 1; prize.style.opacity = 1 };
 
+    // x1000+: extra beats after the boom
+    const encore = () => {
+      later(() => { // second beat: colour shift to cool white
+        if (done) return;
+        const p = origin(); mult.style.color = '#fff'; el.style.setProperty('--tc', '#9ED0EA');
+        flashAll('#BFE3F5', .85, 480); shake(8, 480); pulseRing(6, 700); snd.stinger(3, 1); snd.haptic([40, 40, 80]);
+        if (fx) { fx.burst(p.x, p.y, 100, COOL, [260, 1000]); fx.embers(p.x, p.y, p.w, 38, ALL) }
+      }, 700);
+      if (m >= 10000) later(() => { // third beat
+        if (done) return;
+        const p = origin(); el.style.setProperty('--tc', '#FE7A47'); mult.style.color = '';
+        flashAll('#ffffff', 1, 620); shake(12, 640); pulseRing(7, 800); snd.stinger(3, 2); snd.haptic([80, 40, 80, 40, 220]);
+        if (fx) fx.burst(p.x, p.y, 140, ALL, [300, 1300]);
+      }, 1400);
+    };
+    // tier 2+: flash, shake and sparks
+    const blast = () => {
+      const o = origin(); fx = fx || makeFx(q('.w-fx'), el);
+      if (t === 2) { flashAll('#ffb894', .5, 260); shake(5, 380); fx?.burst(o.x, o.y, 72, WARM, [280, 900]); return }
+      flashAll('#ffffff', 1, 560); shake(14, 720);
+      if (fx) { fx.burst(o.x, o.y, 150, WARM, [300, 1300]); fx.embers(o.x, o.y, o.w, 38, WARM) }
+      if (t >= 4) encore();
+    };
     // the moment of impact (after the hard-cut pause on tier 3+)
     const boom = () => {
       if (done) return;
       showResult(); stamp(); snd.thunk(t); snd.stinger(t, 0);
-      snd.haptic([[], [18], [30, 40, 30], [60, 50, 60, 50, 140], [60, 50, 60, 50, 60, 50, 200]][t]);
+      snd.haptic(HAPTIC[t]);
       if (t >= 1 && ring) pulseRing(t >= 3 ? 5 : 3.6, t >= 3 ? 700 : 520);
       if (t === 0) { flashWin(.4); reel.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(3px)' }, { transform: 'translateY(0)' }], { duration: 170, easing: 'ease-out' }) }
       if (t === 1) { flashWin(.5); reel.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(5px)' }, { transform: 'translateY(0)' }], { duration: 220, easing: 'ease-out' }) }
       if (t >= 2) flashWin(.7);
-      if (!REDUCE && t >= 2) {
-        const o = origin(); fx = fx || makeFx(q('.w-fx'), el);
-        if (t === 2) { flashAll('#ffb894', .5, 260); shake(5, 380); fx && fx.burst(o.x, o.y, 72, WARM, [280, 900]) }
-        else {
-          flashAll('#ffffff', 1, 560); shake(14, 720);
-          if (fx) { fx.burst(o.x, o.y, 150, WARM, [300, 1300]); fx.embers(o.x, o.y, o.w, 38, WARM) }
-          if (t >= 4) {
-            later(() => { // second beat: colour shift to cool white
-              if (done) return; const p = origin(); mult.style.color = '#fff'; el.style.setProperty('--tc', '#9ED0EA');
-              flashAll('#BFE3F5', .85, 480); shake(8, 480); pulseRing(6, 700); snd.stinger(3, 1); snd.haptic([40, 40, 80]);
-              if (fx) { fx.burst(p.x, p.y, 100, COOL, [260, 1000]); fx.embers(p.x, p.y, p.w, 38, ALL) }
-            }, 700);
-            if (m >= 10000) later(() => { // third beat
-              if (done) return; const p = origin(); el.style.setProperty('--tc', '#FE7A47'); mult.style.color = '';
-              flashAll('#ffffff', 1, 620); shake(12, 640); pulseRing(7, 800); snd.stinger(3, 2); snd.haptic([80, 40, 80, 40, 220]);
-              if (fx) fx.burst(p.x, p.y, 140, ALL, [300, 1300]);
-            }, 1400);
-          }
-        }
-      }
+      if (!REDUCE && t >= 2) blast();
       rollUp();
       holdTimer = later(finish, AFTER[t] - BOOM[t]);
     };
 
     // the reel has just stopped on the target cell
     const impact = () => {
-      if (phase !== 'spin') return; phase = 'rev';
+      if (phase !== 'spin') return;
+      phase = 'rev';
       hitCell();
       if (drone) { drone.stop(true); drone = null }
       if (rayAnim) { rayAnim.cancel(); rayAnim = null }
@@ -280,7 +307,8 @@ export function playWheel(info) {
     /* ---------- freeroll: short and clean ---------- */
     if (free) {
       later(() => {
-        if (done) return; phase = 'rev'; showResult(); stamp(); snd.thunk(0); snd.stinger(1, 0); flashAll('#ffffff', .16, 300); rollUp();
+        if (done) return;
+        phase = 'rev'; showResult(); stamp(); snd.thunk(0); snd.stinger(1, 0); flashAll('#ffffff', .16, 300); rollUp();
         holdTimer = later(finish, FREE_MS.hold);
       }, FREE_MS.reveal);
       return;
@@ -313,7 +341,10 @@ export function playWheel(info) {
     const posAt = e => {
       if (e >= S) return D + O - O * (1 - Math.pow(1 - clamp01((e - S) / (SETTLE[t] || 1)), 3));
       let acc = 0;
-      for (const s of prof) { if (e <= s.ms) return acc + s.d * s.e(e / s.ms) * sc; e -= s.ms; acc += s.d * sc }
+      for (const s of prof) {
+        if (e <= s.ms) return acc + s.d * s.e(e / s.ms) * sc;
+        e -= s.ms; acc += s.d * sc;
+      }
       return acc;
     };
     let tStart = performance.now(), prevP = 0, prevT = tStart, lastIdx = -1;
