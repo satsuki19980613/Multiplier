@@ -116,6 +116,6 @@ async function boot() {
   app.booting = false;
   if (!app.user) return renderMenu();
   await refreshMe();   // (goes straight to the table when the player is still seated at one)
-  resumeRoom();
+  void resumeRoom();
 }
 await boot();

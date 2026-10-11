@@ -47,7 +47,7 @@ export function enter(id) {
   $('#table').classList.toggle('u-chip', chipUnit);
   syncHeader();
   refit();
-  poll();
+  void poll();
   T.tickTimer = setInterval(() => { void maybeTick(); tickClock(); }, 400);
 }
 export function leave() {
@@ -123,7 +123,7 @@ async function poll() {
     if (e.code === 'not_found') { toast('卓が見つかりません'); return app.nav.toMenu(); }
   }
   if (t !== T) return;
-  maybeTick();
+  void maybeTick();
   const v = t.v;
   // 終わった：もう読まない（再戦の受付中は、残った人と再戦の開始を知るために読み続ける）
   if (v && (v.status === 'cancelled' || (v.status === 'finished' && !rematchLive(v)))) return;
@@ -847,7 +847,7 @@ async function submit(move) {
   } catch (e) {
     if (t !== T) return;
     t.busy = false;
-    if (['stale', 'not_your_turn', 'game_over'].includes(e.code)) poll();
+    if (['stale', 'not_your_turn', 'game_over'].includes(e.code)) void poll();
     else toast(e.code === 'illegal' ? 'その操作はできません' : '通信エラー。もう一度');
     renderDock();
   }
@@ -960,7 +960,7 @@ addEventListener('resize', refit);
 addEventListener('orientationchange', refit);
 if (window.ResizeObserver) new ResizeObserver(refit).observe(document.querySelector('.app'));
 if (window.visualViewport) visualViewport.addEventListener('resize', refit);
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit);
+void document.fonts?.ready?.then(refit);
 
 
 // メモの印が変わったら席を描き直す
