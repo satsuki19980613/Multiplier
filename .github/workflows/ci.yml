@@ -1,4 +1,4 @@
-# プルリクエストと push ごとに、単体テスト・DB の結合テスト（scripts/itest.mjs を手元の Postgres で）・ビルドを確かめる。
+# プルリクエストと push ごとに、単体テスト・DB の結合テスト（scripts/itest.mjs を手元の Postgres で）・認証の個人の情報が残らないこと（scripts/auth-audit.mjs）・ビルドを確かめる。
 name: CI
 
 on:
@@ -33,8 +33,12 @@ jobs:
       - run: npm test
       - name: テスト用の DB（Neon と同じロールと neon_auth のひな形）にマイグレーションを適用
         run: |
-          psql -h localhost -U postgres -d mtest -v ON_ERROR_STOP=1 -c 'create role anonymous; create role authenticated; create schema neon_auth; create table neon_auth."user"(id uuid primary key, name text not null, email text not null unique, "emailVerified" boolean not null default false, image text, "createdAt" timestamptz not null default now(), "updatedAt" timestamptz not null default now());'
+          psql -h localhost -U postgres -d mtest -v ON_ERROR_STOP=1 -c 'create role anonymous; create role authenticated; create schema neon_auth; create table neon_auth."user"(id uuid primary key, name text not null, email text not null unique, "emailVerified" boolean not null default false, image text, "createdAt" timestamptz not null default now(), "updatedAt" timestamptz not null default now()); create table neon_auth.account(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "accountId" text, "idToken" text, "accessToken" text, "refreshToken" text); create table neon_auth.session(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "ipAddress" text, "userAgent" text);'
           for f in db/migrations/*.sql; do psql -h localhost -U postgres -d mtest -v ON_ERROR_STOP=1 -q -f "$f"; done
       - name: DB の結合テスト（マッチング・対局・賞金・ランキング・シーズンの更新）
         run: node scripts/itest.mjs
+      - name: 認証で届く個人の情報が DB に残らないか（ログインと同じ形で書き込んでから数える）
+        run: |
+          psql -h localhost -U postgres -d mtest -v ON_ERROR_STOP=1 -c "insert into neon_auth.\"user\"(id,name,email,image) values('00000000-0000-4000-8000-0000000000f1','Real Name','real@example.test','https://example.test/a.png'); insert into neon_auth.account(\"userId\",\"accountId\",\"idToken\",\"accessToken\",\"refreshToken\") values('00000000-0000-4000-8000-0000000000f1','g1','id','at','rt'); insert into neon_auth.session(\"userId\",\"ipAddress\",\"userAgent\") values('00000000-0000-4000-8000-0000000000f1','203.0.113.1','Mozilla');"
+          AUDIT_DATABASE_URL="$ITEST_DATABASE_URL" node scripts/auth-audit.mjs
       - run: npm run build
