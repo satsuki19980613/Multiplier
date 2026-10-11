@@ -54,7 +54,7 @@ async function refreshMe() {
   try { app.prof = await app.net.rpc('me') }
   catch (e) { if (e.code === 'not_authenticated') { app.user = null; app.prof = null } }
   // the hand history: copy the tables of the last 3 days that this device has not fully copied yet (once per start)
-  if (!synced && app.prof && app.prof.recent) { synced = true; syncRecent(app.prof.recent).then(() => stats.invalidate()) }
+  if (!synced && app.prof && app.prof.recent) { synced = true; void syncRecent(app.prof.recent).then(() => stats.invalidate()) }
   // still seated at a running table (e.g. after a reload): there is no way back to the menu except Retire or finishing, so go straight to the table
   if (app.prof && app.prof.game && !table.active() && !inQueue() && !entering) { enterGame(app.prof.game, { wheel: false }); return app.prof }
   renderMenu();

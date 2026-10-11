@@ -10,6 +10,7 @@ import { tableViews, toMove } from '../tview.js';
 import { TURN_MS, rematchLeader, rematchOpen } from '../../server/game/rules.js';
 import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE, fmtPt, fmtBb, localGet, localSet } from './util.js';
 import { syncRoom } from '../history/sync.js';
+import { secureRnd } from '../rnd.js';
 import * as chat from './chat.js';
 import { viewportHooks, gliding } from './viewport.js';
 import { quickSizes, stepChips } from '../betsize.js';
@@ -47,7 +48,7 @@ export function enter(id) {
   syncHeader();
   refit();
   poll();
-  T.tickTimer = setInterval(() => { maybeTick(); tickClock(); }, 400);
+  T.tickTimer = setInterval(() => { void maybeTick(); tickClock(); }, 400);
 }
 export function leave() {
   if (!T) return;
@@ -99,7 +100,7 @@ export function askRetire() {
       const r = await net().game({ op: 'retire', game: t.id });
       if (T === t) { t.retired = true; clock.offset = r.now - Date.now(); receive(r.view, true); }
     } catch (e) {
-      if (T === t && ['game_over', 'already_out', 'not_found'].includes(e.code)) { t.retired = e.code === 'already_out'; poll(); }   // 卓が先に進んでいた：見直す
+      if (T === t && ['game_over', 'already_out', 'not_found'].includes(e.code)) { t.retired = e.code === 'already_out'; void poll(); }   // 卓が先に進んでいた：見直す
       else if (T === t) toast('通信エラー。もう一度');
     }
     if (T === t) { t.retiring = false; syncHeader(); }
@@ -129,7 +130,7 @@ async function poll() {
   const mine = v && v.hand && v.hand.toAct === v.seat;
   t.timer = setTimeout(poll, document.hidden ? 4000 : v && v.status === 'finished' ? 1500 : mine ? 2500 : 1000);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && T) poll(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && T) void poll(); });
 
 // 期限を過ぎたものを進める：Bot の考える時間（botAt）、人の持ち時間（deadline + GRACE）。判断はサーバー。409 not_yet は普通のこと。
 // 見るのは最後に受け取った Multiplier のビュー（卓に当てているビューは演出の分だけ遅れている）
@@ -144,7 +145,7 @@ async function maybeTick() {
     const r = await net().game({ op: 'tick', game: t.id });
     if (t === T) { clock.offset = r.now - Date.now(); receive(r.view); }
   } catch (e) {
-    if (t === T) t.tickAt = Date.now() + (e.code === 'not_yet' ? 500 + Math.random() * 500 : 1500);
+    if (t === T) t.tickAt = Date.now() + (e.code === 'not_yet' ? 500 + secureRnd() * 500 : 1500);
   } finally { t.tickBusy = false; }
 }
 
@@ -245,9 +246,9 @@ function checkResult() {
   const want = (ended && !t.overShown) || (!ended && me.status === 'out' && !t.resultShown);
   const wait = want && !t.retired ? t.settledAt + PACE.result - Date.now() : 0;
   if (wait > 0) { clearTimeout(t.resT); t.resT = setTimeout(() => { if (T === t) checkResult(); }, wait + 20); return; }
-  if (ended && !t.overShown) { t.overShown = true; showResult(); }
-  else if (ended && $('#overDlg').open) showResult();   // 開いている間は席に残った人を更新する
-  else if (!ended && me.status === 'out' && !t.resultShown) showResult();
+  if (ended && !t.overShown) { t.overShown = true; void showResult(); }
+  else if (ended && $('#overDlg').open) void showResult();   // 開いている間は席に残った人を更新する
+  else if (!ended && me.status === 'out' && !t.resultShown) void showResult();
   if (ended && t.overShown) clearBoard();   // 結果を出したら卓を片付ける（最後のハンドを残さない）
 }
 /** 終局後の卓：ボード・手札・ベット・ポットを消し（ふわっと）、席には順位だけを出す。最後のハンドは結果のダイアログとハンド履歴で見られる */
@@ -296,7 +297,7 @@ async function showResult() {
   $('#overBody').onclick = e => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     if (b.dataset.act === 'watch') { dlg.close(); render(); }
-    if (b.dataset.act === 'stay') stay();
+    if (b.dataset.act === 'stay') void stay();
     if (b.dataset.act === 'menu') toMenu();
     if (b.dataset.act === 'again') { const stake = m.stake; depart(); closeOver(); app.nav.playAgain(stake, priv); }
   };
@@ -313,15 +314,15 @@ async function showResult() {
 const privateRoom = v => !!(v && v.room && v.room.kind === 'private');
 async function stay() {
   const t = T; if (!t || t.rmBusy) return;
-  t.rmBusy = true; if ($('#overDlg').open) showResult();
+  t.rmBusy = true; if ($('#overDlg').open) void showResult();
   try {
     const r = await net().game({ op: 'stay', game: t.id });
     if (T !== t) return;
-    t.rmBusy = false; clock.offset = r.now - Date.now(); receive(r.view, true); closeOver(); render(); poll();
+    t.rmBusy = false; clock.offset = r.now - Date.now(); receive(r.view, true); closeOver(); render(); void poll();
   } catch (e) {
     if (T !== t) return;
     t.rmBusy = false; toast(e.code === 'room_closed' ? '再戦の受付は終わりました' : '通信エラー。もう一度');
-    if ($('#overDlg').open) showResult();
+    if ($('#overDlg').open) void showResult();
   }
 }
 async function rematch() {
@@ -336,7 +337,7 @@ async function rematch() {
     t.rmBusy = false;
     toast({ not_enough: '残っている人が足りません', room_closed: '再戦の受付は終わりました', not_host: '再戦はホストが始めます', in_game: 'ほかの卓に着いています',
       insufficient_chips: '残高が足りません' }[e.code] || '通信エラー。もう一度');
-    poll(); renderDock();
+    void poll(); renderDock();
   }
 }
 /** PRIVATE の卓で、終局後・飛んだ後にこの卓を離れる：再戦の対象から外れることをサーバーに伝える（返事は待たない） */
@@ -721,7 +722,7 @@ function autoPre() {
   if (t.pre !== autoPreKey()) { t.pre = null; return; }
   t.pre = null;
   const l = v.legal; if (!l) return;
-  setTimeout(() => { if (T === t && t.v.ver === v.ver) submit({ type: l.canCheck ? 'check' : 'fold' }); }, 250);
+  setTimeout(() => { if (T === t && t.v.ver === v.ver) void submit({ type: l.canCheck ? 'check' : 'fold' }); }, 250);
 }
 function renderDock() {
   const t = T, v = t.v, h = v.hand, me = v.seat, p = v.players[me], dock = $('#dock'), el = $('#dockMain');
@@ -833,7 +834,7 @@ async function seatOp(op) {
   const t = T; if (!t || t.busy) return;
   t.busy = true;
   try { const r = await net().game({ op, game: t.id }); if (t !== T) return; t.busy = false; clock.offset = r.now - Date.now(); receive(r.view); }
-  catch (e) { if (t !== T) return; t.busy = false; poll(); }
+  catch (e) { if (t !== T) return; t.busy = false; void poll(); }
 }
 async function submit(move) {
   const t = T; if (!t || t.busy) return;
@@ -949,7 +950,7 @@ export function fitTable(force, glide) {
   chat.afterFit();
 }
 viewportHooks({
-  measure: () => { if (document.body.dataset.screen !== 'game' || !T || !T.v) return null; fitTable(true, true); return { cw: parseFloat($('#stage').style.getPropertyValue('--cw')), tableH: $('#table').clientHeight }; },
+  measure: () => { if (document.body.dataset.screen !== 'game' || !T || !T.v) return null; fitTable(true, true); return { cw: Number.parseFloat($('#stage').style.getPropertyValue('--cw')), tableH: $('#table').clientHeight }; },
   focused: () => document.activeElement === $('#chatIn'),
   done: () => { if (fitWait) { fitWait = false; fitTable(true); } },
 });

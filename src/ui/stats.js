@@ -40,7 +40,7 @@ export function invalidate() { games = null; mine = new Map(); handsCache.clear(
 
 export function render(el, pane, fromLoad) {
   pane0 = pane;
-  if (games === null) { if (!fromLoad) load(); return paint(el, '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>'); }
+  if (games === null) { if (!fromLoad) void load(); return paint(el, '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>'); }
   if (pane === 'history') return paint(el, historyHTML(), bindHistory);
   paint(el, statsHTML(), bindStats);
 }

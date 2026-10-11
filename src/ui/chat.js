@@ -58,7 +58,7 @@ export function stop() {
 /** game_poll の応答ごと（seq = 卓の最新の発言番号） */
 export function onPoll(seq) {
   if (!S.on || !S.loaded || seq == null) return;
-  if (+seq > S.seq) pull(false);
+  if (+seq > S.seq) void pull(false);
 }
 /** ビューの適用ごと */
 export function onView(v) {
@@ -66,7 +66,7 @@ export function onView(v) {
   S.v = v;
   const on = !!(v.room && v.room.kind === 'private');
   if (on !== S.on) { setOn(on); notify(); }
-  if (on && !S.loaded && !S.loading) pull(true);
+  if (on && !S.loaded && !S.loading) void pull(true);
   syncTurn();
 }
 
@@ -104,7 +104,7 @@ async function pull(silent) {
   } finally {
     if (tk === S.token) {
       S.loading = false;
-      if (S.again) { S.again = false; pull(false); }
+      if (S.again) { S.again = false; void pull(false); }
     }
   }
 }
@@ -114,7 +114,7 @@ async function send() {
   const text = normalizeChat(i.value);
   if (!text) { i.value = ''; syncLeft(); return; }
   const wait = S.lastSent + CHAT_MIN_INTERVAL_MS - Date.now();
-  if (wait > 0) { S.sending = true; syncLeft(); setTimeout(() => { S.sending = false; send(); }, wait + 30); return; }
+  if (wait > 0) { S.sending = true; syncLeft(); setTimeout(() => { S.sending = false; void send(); }, wait + 30); return; }
   const tk = S.token, v = S.v;
   const local = { seq: null, seat: v.seat, text, at: Date.now(), local: true };
   S.msgs.push(local); S.lastSent = Date.now();
@@ -178,7 +178,7 @@ function ensureComposer() {
     }
     if (e.key === 'Enter') {
       if (e.isComposing || e.keyCode === 229 || composing) return;   // IME の確定は送信しない
-      e.preventDefault(); send();
+      e.preventDefault(); void send();
     }
   });
   i.addEventListener('blur', () => { setTimeout(() => { if (isOpen() && document.activeElement !== i && !document.hidden) closeComposer(); }, 0); });
@@ -305,7 +305,7 @@ const M = 4, TAIL = 7;
 function shapes(b, a, R, BL, BR) {
   const el = b.el, mine = b.seat === (S.v && S.v.seat);
   const prev = el.style.fontSize; el.style.fontSize = '';
-  const fs = parseFloat(getComputedStyle(el).fontSize) || 13; el.style.fontSize = prev;
+  const fs = Number.parseFloat(getComputedStyle(el).fontSize) || 13; el.style.fontSize = prev;
   const small = Math.max(11, Math.round(fs * .86 * 10) / 10);
   // 札の横の空き（横に置く細い形の幅）
   const gap = Math.round(Math.max(a.cl - R.left - BL, BR - (a.cr - R.left)) - TAIL - 4);
@@ -484,7 +484,7 @@ export function settle(fn) {
   const run = [];
   for (const e of document.querySelectorAll('#seats .bchip')) for (const a of e.getAnimations()) {
     const end = a.effect && a.effect.getComputedTiming().endTime;
-    if (a.playState === 'running' && end != null && isFinite(end)) { run.push([a, a.currentTime]); a.currentTime = end - 1; }
+    if (a.playState === 'running' && end != null && Number.isFinite(end)) { run.push([a, a.currentTime]); a.currentTime = end - 1; }
   }
   try { return fn(); } finally { for (const [a, t] of run) { try { a.currentTime = t; } catch (e) { /* 終わっていた */ } } }
 }

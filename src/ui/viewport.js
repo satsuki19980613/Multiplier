@@ -30,7 +30,7 @@ function probeInsets() {
   p.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
     'padding-top:env(safe-area-inset-top,0px);padding-bottom:max(env(safe-area-inset-bottom,0px),env(safe-area-max-inset-bottom,0px))';
   document.body.appendChild(p);
-  const cs = getComputedStyle(p), top = parseFloat(cs.paddingTop) || 0, bottom = parseFloat(cs.paddingBottom) || 0;
+  const cs = getComputedStyle(p), top = Number.parseFloat(cs.paddingTop) || 0, bottom = Number.parseFloat(cs.paddingBottom) || 0;
   p.remove();
   return { top, bottom };
 }
@@ -57,9 +57,9 @@ export function snapshot() {
   snap = true;
 }
 const stage = () => document.getElementById('stage');
-const cwNow = () => parseFloat(stage()?.style.getPropertyValue('--cw')) || 0;
+const cwNow = () => Number.parseFloat(stage()?.style.getPropertyValue('--cw')) || 0;
 const lane = () => document.getElementById('chatLane');   // its width is decided by the fit too (chat.js fitsLane)
-const lwNow = () => { const l = lane(); return l ? [parseFloat(l.style.width) || 0, parseFloat(l.style.getPropertyValue('--lane-dy')) || 0] : null; };
+const lwNow = () => { const l = lane(); return l ? [Number.parseFloat(l.style.width) || 0, Number.parseFloat(l.style.getPropertyValue('--lane-dy')) || 0] : null; };
 
 function setVars(h, cw, kbp, kbm, lw) {
   const l = lw && lw[0] ? lane() : null;

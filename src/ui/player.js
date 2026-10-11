@@ -74,7 +74,7 @@ export function openPlayer(s) {
   const d = dlg(); d.classList.remove('pd-kb'); d.style.marginTop = '';   // 前にキーボードで上へ寄せたまま閉じていた
   openDlg('#playerDlg');
   $('#pdScroll').focus({ preventScroll: true });
-  load(P);
+  void load(P);
 }
 function save(p) {
   clearTimeout(p.saveT);
