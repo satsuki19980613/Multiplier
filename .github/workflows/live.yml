@@ -48,7 +48,7 @@ jobs:
         run: |
           if [ -n "$NEON_API_KEY" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"
           else echo "::warning::Secret NEON_API_KEY が無いので dev の確認を飛ばします"; echo "ready=false" >> "$GITHUB_OUTPUT"; fi
-      - run: npm ci
+      - run: npm ci --ignore-scripts
         if: steps.cfg.outputs.ready == 'true'
       - name: マイグレーション（dev）
         if: steps.cfg.outputs.ready == 'true'

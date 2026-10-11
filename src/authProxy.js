@@ -12,7 +12,10 @@ export const PROXIED_PATHS=['sign-in/social','get-session','token','sign-out','o
 export const NEON_AUTH_COOKIE=/^(__Secure-|__Host-)?neon-?auth\./;
 export const AUTH_PROXY_PREFIX='/api/auth';
 
-export function isProxiedPath(path){return PROXIED_PATHS.includes(path.replace(/^\/+|\/+$/g,''))}
+export const trimLeadingSlashes=s=>{let i=0;while(s[i]==='/')i++;return s.slice(i)};
+export const trimTrailingSlashes=s=>{let e=s.length;while(e>0&&s[e-1]==='/')e--;return s.slice(0,e)};
+
+export function isProxiedPath(path){return PROXIED_PATHS.includes(trimTrailingSlashes(trimLeadingSlashes(path)))}
 
 /** Neon Auth Set-Cookie → first-party cookie: drop Domain and Partitioned, SameSite=None → Lax; keep the rest */
 export function firstPartyCookie(setCookie){
@@ -33,10 +36,11 @@ export function authCookies(cookie){
 }
 
 const DROP_REQUEST=new Set(['host','cookie','content-length','connection','cf-connecting-ip','cf-ipcountry','cf-ray','cf-visitor','cdn-loop']);
+const dropResponse=key=>key==='set-cookie'||key.startsWith('access-control-')||key==='content-encoding'||key==='content-length';
 
 export async function toUpstream(req,upstream,path){
   const url=new URL(req.url);
-  const target=`${upstream.replace(/\/+$/,'')}/${path.replace(/^\/+/,'')}${url.search}`;
+  const target=`${trimTrailingSlashes(upstream)}/${trimLeadingSlashes(path)}${url.search}`;
   const headers=new Headers();
   req.headers.forEach((v,k)=>{if(!DROP_REQUEST.has(k.toLowerCase()))headers.set(k,v)});
   const cookie=authCookies(req.headers.get('cookie'));if(cookie)headers.set('cookie',cookie);
@@ -46,7 +50,7 @@ export async function toUpstream(req,upstream,path){
 
 export function fromUpstream(res){
   const headers=new Headers();
-  res.headers.forEach((v,k)=>{const key=k.toLowerCase();if(key==='set-cookie'||key.startsWith('access-control-')||key==='content-encoding'||key==='content-length')return;headers.set(k,v)});
+  res.headers.forEach((v,k)=>{if(!dropResponse(k.toLowerCase()))headers.set(k,v)});
   for(const c of res.headers.getSetCookie())headers.append('set-cookie',firstPartyCookie(c));
   headers.set('cache-control','no-store');headers.set('x-content-type-options','nosniff');
   return new Response(res.body,{status:res.status,statusText:res.statusText,headers});

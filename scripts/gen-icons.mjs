@@ -16,7 +16,8 @@ const browser=await chromium.launch();
 try{
   for(const[file,size,src]of[['apple-touch-icon.png',180,svg],['icon-192.png',192,svg],['icon-512.png',512,svg],['icon-maskable-512.png',512,maskable]]){
     const page=await browser.newPage({viewport:{width:size,height:size}});
-    await page.setContent(`<html><body style="margin:0">${src.replace('<svg ',`<svg width="${size}" height="${size}" `)}</body></html>`);
+    const sized=src.replace('<svg ',`<svg width="${size}" height="${size}" `);
+    await page.setContent(`<html><body style="margin:0">${sized}</body></html>`);
     await page.screenshot({path:resolve(PUBLIC,file)}); // opaque: the SVG paints a full-bleed background
     await page.close();console.log(`${file} (${size})`);
   }

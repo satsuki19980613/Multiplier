@@ -30,18 +30,18 @@ let Q=null;   // { stake, since }
 let G=null;   // { id, seat, game: { state, meta }, views, status, friends: [seats] }
 let R=null;   // a private room: rooms.js room + { due: [{ at, uid, name }] } (friends still to come)
 
-const lag=v=>new Promise(r=>setTimeout(()=>r(structuredClone(v)),100+Math.random()*120));
+const lag=v=>new Promise(r=>setTimeout(()=>r(structuredClone(v)),100+secureRnd()*120));
 const jstDay=()=>new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
 const frUsed=()=>fr.day===jstDay()?fr.used:0;
 const season=()=>{const s=seasonOf(new Date());return{id:s.id,endsAt:+new Date(s.endsAt)}};
 // the table the player is still playing at (once eliminated, the player is free to queue again)
-const active=()=>G&&G.status==='active'&&G.game.state.places[G.seat]===null?G:null;
+const active=()=>G?.status==='active'&&G.game.state.places[G.seat]===null?G:null;
 
 export const online=true;
 export const onSessionLost=()=>{};
 export async function currentUser(){return{id:'fake-user'}}
-export async function signIn(){}
-export async function signOut(){}
+export async function signIn(){/* nothing to sign in to */}
+export async function signOut(){/* nothing to sign out of */}
 
 function store(game,step,seat){
   const out=commit(game,step);
@@ -99,7 +99,11 @@ function roomFor(code){
 }
 function noRoomGame(){if(active())throw new MoveError('in_game',{game:G.id})}
 
-const waiting=stake=>{const w=Object.fromEntries(STAKE_KEYS.map(k=>[k,0]));if(stake)w[stake]=1;return w};
+const waiting=stake=>{
+  const w=Object.fromEntries(STAKE_KEYS.map(k=>[k,0]));
+  if(stake)w[stake]=1;
+  return w;
+};
 
 const NAMES=['Kei','Mio','Ren','Aoi','Sora','Hina','Yuto','Nana','Haru','Riku','Mei','Sho'];
 function rankingRows(){
@@ -109,18 +113,20 @@ function rankingRows(){
   return rows;
 }
 
+function setNickname(name){
+  const v=String(name??'').trim();
+  if(!v||[...v].length>16||v.includes('🤖'))throw new MoveError('nickname_invalid');
+  if(NAMES.some(n=>n.toLowerCase()===v.toLowerCase()))throw new MoveError('nickname_taken');
+  me.nickname=v;return lag({nickname:v});
+}
+
 export async function rpc(name,args={}){
   if(name==='me'){
     const used=frUsed();
     return lag({nickname:me.nickname,chips:me.chips,freeroll:{used,left:Math.max(0,FREEROLL.perDay-used),eligible:me.chips<FREEROLL.eligibleBelow&&used<FREEROLL.perDay},
       game:active()?G.id:null,season:season()});
   }
-  if(name==='set_nickname'){
-    const v=String(args.p_name??'').trim();
-    if(!v||[...v].length>16||v.includes('🤖'))throw new MoveError('nickname_invalid');
-    if(NAMES.some(n=>n.toLowerCase()===v.toLowerCase()))throw new MoveError('nickname_taken');
-    me.nickname=v;return lag({nickname:v});
-  }
+  if(name==='set_nickname')return setNickname(args.p_name);
   if(name==='game_poll'){
     if(!G||args.p_game!==G.id)throw new MoveError('not_found');
     const ver=G.game.state.ver;
@@ -137,64 +143,68 @@ export async function rpc(name,args={}){
   throw new MoveError('unknown_rpc');
 }
 
+function roomWait(body){
+  if(!R||body.room!==R.id)throw new MoveError('not_found');
+  if(R.status==='waiting')roomNow();
+  R={...touchRoom(R,'me',Date.now()),due:R.due};
+  roomStart(body.op==='room_wait');
+  return roomReply();
+}
+function play(body){
+  if(!G||body.game!==G.id)throw new MoveError('not_found');
+  if(G.status!=='active')throw new MoveError('game_over');
+  const cur={state:G.game.state,meta:G.game.meta};
+  let step;
+  if(body.op==='act')step=applyRequest(cur,G.seat,{op:'act',ver:body.ver,move:body.move},Date.now());
+  else if(body.op==='retire')step=applyRequest(cur,G.seat,{op:'retire'},Date.now());
+  else{
+    if(IDLE&&G.game.meta.bots[actor(cur.state)])throw new MoveError('not_yet');
+    step=tick(cur,Date.now(),{botMove,rnd:secureRnd});
+  }
+  store(cur,step,G.seat);
+  return reply();
+}
+const OPS={
+  queue(body){
+    if(!STAKE_KEYS.includes(body.stake))throw new MoveError('illegal');
+    if(active())return{waiting:waiting(null),since:null,game:G.id,now:Date.now()};
+    checkEntry({chips:me.chips,frUsedToday:frUsed()},body.stake);
+    if(Q?.stake!==body.stake)Q={stake:body.stake,since:Date.now()};
+    if(Date.now()-Q.since>=WAIT)return{waiting:waiting(null),since:null,game:makeTable(body.stake),now:Date.now()};
+    return{waiting:waiting(body.stake),since:Q.since,game:null,now:Date.now()};
+  },
+  leave(){Q=null;return{ok:true}},
+  room_create(body){
+    if(!ROOM_STAKES.includes(body.stake))throw new MoveError('illegal');
+    noRoomGame();checkEntry({chips:me.chips,frUsedToday:0},body.stake);
+    const now=Date.now(),names=shuffle(FRIENDS,secureRnd);
+    R={...newRoom({id:crypto.randomUUID(),code:genCode(secureRnd),stake:body.stake,uid:'me',name:me.nickname,now}),
+      due:[{at:now+FRIEND,uid:'f1',name:names[0]},{at:now+FRIEND*2,uid:'f2',name:names[1]}]};
+    Q=null;return roomReply();
+  },
+  room_peek(body){
+    if(R&&R.code===body.code)return{room:roomPeek(R,'me',Date.now()),now:Date.now()};
+    const r=roomFor(body.code);
+    return{room:r&&roomPeek(r,'me',Date.now()),now:Date.now()};
+  },
+  room_join(body){
+    const r=R&&R.code===body.code&&R.status==='waiting'?R:roomFor(body.code);
+    if(!r)throw new MoveError('not_found');
+    noRoomGame();checkEntry({chips:me.chips,frUsedToday:0},r.stake);
+    R={...joinRoom(r,'me',me.nickname,Date.now()),due:r.due};
+    roomNow();roomStart(true);
+    return roomReply();
+  },
+  room_wait:roomWait,room_start:roomWait,
+  room_leave(body){
+    if(R&&body.room===R.id)R={...leaveRoom(R,'me',Date.now()),due:[]};
+    return{ok:true};
+  },
+  act:play,tick:play,retire:play,
+};
+
 export async function game(body){
   await lag(null);
-  switch(body.op){
-    case'queue':{
-      if(!STAKE_KEYS.includes(body.stake))throw new MoveError('illegal');
-      if(active())return{waiting:waiting(null),since:null,game:G.id,now:Date.now()};
-      checkEntry({chips:me.chips,frUsedToday:frUsed()},body.stake);
-      if(!Q||Q.stake!==body.stake)Q={stake:body.stake,since:Date.now()};
-      if(Date.now()-Q.since>=WAIT)return{waiting:waiting(null),since:null,game:makeTable(body.stake),now:Date.now()};
-      return{waiting:waiting(body.stake),since:Q.since,game:null,now:Date.now()};
-    }
-    case'leave':Q=null;return{ok:true};
-    case'room_create':{
-      if(!ROOM_STAKES.includes(body.stake))throw new MoveError('illegal');
-      noRoomGame();checkEntry({chips:me.chips,frUsedToday:0},body.stake);
-      const now=Date.now(),names=shuffle(FRIENDS,secureRnd);
-      R={...newRoom({id:crypto.randomUUID(),code:genCode(secureRnd),stake:body.stake,uid:'me',name:me.nickname,now}),
-        due:[{at:now+FRIEND,uid:'f1',name:names[0]},{at:now+FRIEND*2,uid:'f2',name:names[1]}]};
-      Q=null;return roomReply();
-    }
-    case'room_peek':{
-      if(R&&R.code===body.code)return{room:roomPeek(R,'me',Date.now()),now:Date.now()};
-      const r=roomFor(body.code);
-      return{room:r&&roomPeek(r,'me',Date.now()),now:Date.now()};
-    }
-    case'room_join':{
-      const r=R&&R.code===body.code&&R.status==='waiting'?R:roomFor(body.code);
-      if(!r)throw new MoveError('not_found');
-      noRoomGame();checkEntry({chips:me.chips,frUsedToday:0},r.stake);
-      R={...joinRoom(r,'me',me.nickname,Date.now()),due:r.due};
-      roomNow();roomStart(true);
-      return roomReply();
-    }
-    case'room_wait':case'room_start':{
-      if(!R||body.room!==R.id)throw new MoveError('not_found');
-      if(R.status==='waiting')roomNow();
-      R={...touchRoom(R,'me',Date.now()),due:R.due};
-      roomStart(body.op==='room_wait');
-      return roomReply();
-    }
-    case'room_leave':{
-      if(R&&body.room===R.id)R={...leaveRoom(R,'me',Date.now()),due:[]};
-      return{ok:true};
-    }
-    case'act':case'tick':case'retire':{
-      if(!G||body.game!==G.id)throw new MoveError('not_found');
-      if(G.status!=='active')throw new MoveError('game_over');
-      const cur={state:G.game.state,meta:G.game.meta};
-      let step;
-      if(body.op==='act')step=applyRequest(cur,G.seat,{op:'act',ver:body.ver,move:body.move},Date.now());
-      else if(body.op==='retire')step=applyRequest(cur,G.seat,{op:'retire'},Date.now());
-      else{
-        if(IDLE&&G.game.meta.bots[actor(cur.state)])throw new MoveError('not_yet');
-        step=tick(cur,Date.now(),{botMove,rnd:secureRnd});
-      }
-      store(cur,step,G.seat);
-      return reply();
-    }
-  }
-  throw new MoveError('illegal');
+  if(!Object.hasOwn(OPS,body.op))throw new MoveError('illegal');
+  return OPS[body.op](body);
 }

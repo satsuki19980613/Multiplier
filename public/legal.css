@@ -110,7 +110,7 @@ ol.sub > li::before { content: "(" counter(sub) ")"; display: inline-block; widt
 }
 
 table { width: 100%; border-collapse: collapse; margin: .75rem 0; background: var(--surface); font-size: .92rem; }
-th, td { border: 1px solid var(--line); padding: .5rem .6rem; text-align: left; vertical-align: top; }
+th, td { border: 1px solid var(--line); padding: .5rem .6rem; text-align: left; vertical-align: top; overflow-wrap: break-word; }
 th { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); white-space: nowrap; }
 .tablewrap { overflow-x: auto; }
 
@@ -126,4 +126,4 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line);
   .topbar nav { display: none; }
 }
 .endmeta { margin-top: 2rem; }
-td, th { overflow-wrap: break-word; } .tablewrap table { min-width: 28rem; }
+.tablewrap table { min-width: 28rem; }

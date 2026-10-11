@@ -19,7 +19,7 @@ function showScreen(n) {
 function toMenu() {
   table.leave(); room.stop(); closeAllDlg();
   showScreen('menu'); setPane('main');
-  if (app.user) refreshMe();
+  if (app.user) void refreshMe();
 }
 let entering = false;
 async function enterGame(id, opts = {}) {
@@ -30,7 +30,7 @@ async function enterGame(id, opts = {}) {
     if (opts.wheel) {
       try {
         const v = await table.peek(id);
-        if (v && v.meta) await playWheel({ stake: v.meta.stake, multiplier: v.meta.multiplier, prize: v.meta.prize });
+        if (v?.meta) await playWheel({ stake: v.meta.stake, multiplier: v.meta.multiplier, prize: v.meta.prize });
       } catch (e) { /* the wheel is only a show: go to the table anyway */ }
     }
     table.enter(id);
@@ -39,7 +39,7 @@ async function enterGame(id, opts = {}) {
 // a private table goes back to the private menu (make or join another room); the others queue at the same stake again
 function playAgain(stake, priv) {
   table.leave(); closeAllDlg(); showScreen('menu');
-  if (priv) { setPane('private'); if (app.user) refreshMe() } else startQueue(stake);
+  if (priv) { setPane('private'); if (app.user) void refreshMe() } else void startQueue(stake);
 }
 
 /* ---------- account ---------- */
@@ -47,7 +47,7 @@ async function refreshMe() {
   try { app.prof = await app.net.rpc('me') }
   catch (e) { if (e.code === 'not_authenticated') { app.user = null; app.prof = null } }
   // still seated at a running table (e.g. after a reload): there is no way back to the menu except Retire or finishing, so go straight to the table
-  if (app.prof && app.prof.game && !table.active() && !inQueue() && !entering) { enterGame(app.prof.game, { wheel: false }); return app.prof }
+  if (app.prof?.game && !table.active() && !inQueue() && !entering) { void enterGame(app.prof.game, { wheel: false }); return app.prof }
   renderMenu();
   return app.prof;
 }
@@ -86,6 +86,8 @@ document.addEventListener('click', e => { const cl = e.target.closest('[data-clo
 document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e => { if (e.target === d && d.id !== 'overDlg') d.close() }));
 
 /* ---------- boot ---------- */
+// installable as an app (home screen). The worker caches nothing (public/sw.js)
+if ('serviceWorker' in navigator && !import.meta.env.DEV) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 async function boot() {
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('fake')) { app.net = await import('./fakeNet.js') }
   app.booting = app.net.online;   // until the session check below has answered: the loader, not the sign-in screen
@@ -99,6 +101,4 @@ async function boot() {
   await refreshMe();   // (goes straight to the table when the player is still seated at one)
   resumeRoom();
 }
-boot();
-// installable as an app (home screen). The worker caches nothing (public/sw.js)
-if ('serviceWorker' in navigator && !import.meta.env.DEV) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+await boot();
