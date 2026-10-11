@@ -5,7 +5,7 @@
 // security headers. That notice is also what Mozilla HTTP Observatory sees.
 import{appendFileSync}from'node:fs';
 
-const trimSlash=v=>{let e=v.length;while(e>0&&v[e-1]==='/')e--;return v.slice(0,e)};
+const trimSlash=v=>{let e=v.length;while(e>0&&v[e-1]==='/'){e--}return v.slice(0,e)};
 const env=n=>{const v=process.env[n];if(!v){console.error(`環境変数 ${n} が必要です`);process.exit(2)}return trimSlash(v)};
 // what the servers answered goes to the log as one line: control characters (newlines included) become spaces
 const logSafe=v=>String(v).replaceAll(/\p{Cc}+/gu,' ');

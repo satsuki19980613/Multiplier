@@ -12,8 +12,8 @@ export const PROXIED_PATHS=['sign-in/social','get-session','token','sign-out','o
 export const NEON_AUTH_COOKIE=/^(__Secure-|__Host-)?neon-?auth\./;
 export const AUTH_PROXY_PREFIX='/api/auth';
 
-export const trimLeadingSlashes=s=>{let i=0;while(s[i]==='/')i++;return s.slice(i)};
-export const trimTrailingSlashes=s=>{let e=s.length;while(e>0&&s[e-1]==='/')e--;return s.slice(0,e)};
+export const trimLeadingSlashes=s=>{let i=0;while(s[i]==='/'){i++}return s.slice(i)};
+export const trimTrailingSlashes=s=>{let e=s.length;while(e>0&&s[e-1]==='/'){e--}return s.slice(0,e)};
 
 export function isProxiedPath(path){return PROXIED_PATHS.includes(trimTrailingSlashes(trimLeadingSlashes(path)))}
 

@@ -129,7 +129,10 @@ function queueHTML() {
   const w = Math.max(1, Math.min(3, Q.waiting || 1)), left = Math.max(0, QUEUE_MAX_S - Math.floor((Date.now() - Q.t0) / 1000));
   const off = 289 * (1 - left / QUEUE_MAX_S);
   const buy = Q.stake === 'free' ? 'FREEROLL' : `${STAKE_LABEL[Q.stake]} · ${fmt(STAKES[Q.stake].buyIn)}`;
-  const slot = i => { if (i >= w) return ''; return i === 0 ? 'YOU' : '●' };
+  const slot = i => {
+    if (i >= w) return '';
+    return i === 0 ? 'YOU' : '●';
+  };
   const slots = [0, 1, 2].map(i => `<i class="${i < w ? 'on' : ''}">${slot(i)}</i>`).join('');
   return `<div class="qbox"><div class="q-stake">${buy}</div>
     <div class="q-slots" aria-label="${w} / 3">${slots}</div>

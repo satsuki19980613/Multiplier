@@ -74,6 +74,17 @@ async function loadGame(c,uid,gameId){
 const canEnter=(p,stake)=>{
   try{checkEntry(p,stake);return true}catch{return false}
 };
+
+// The caller may make or enter a room of `stake`: not seated at a running table (in_game, with the game) and able to pay.
+async function checkRoomEntry(c,uid,stake){
+  const P=await lockProfiles(c,[uid]),p=P.get(uid);
+  if(!p)throw new MoveError('no_profile');
+  const s=await seatedAt(c,[uid]);
+  if(s.has(uid))throw new MoveError('in_game',{game:s.get(uid)});
+  checkEntry(p,stake);
+  return p;
+}
+
 // The (up to) three earliest fresh waiters of `stake` who can enter (profiles in P, not seated at a table: busy); anybody else who can
 // no longer enter is dropped from the queue (the caller stays). => [profile]
 async function takeGroup(c,stake,uid,P,busy){
@@ -143,16 +154,6 @@ export function makeDb(pool,deps={}){
   const saveRoom=(c,room)=>c.query('update public.rooms set members=$2,status=$3,game=$4,updated_at=now() where id=$1',
     [room.id,JSON.stringify(room.members),room.status,room.game]);
   const roomReply=(room,uid)=>{const t=now();return{room:roomView(room,uid,t),now:t}};
-
-  // The caller may make or enter a room of `stake`: not seated at a running table (in_game, with the game) and able to pay.
-  async function checkRoomEntry(c,uid,stake){
-    const P=await lockProfiles(c,[uid]),p=P.get(uid);
-    if(!p)throw new MoveError('no_profile');
-    const s=await seatedAt(c,[uid]);
-    if(s.has(uid))throw new MoveError('in_game',{game:s.get(uid)});
-    checkEntry(p,stake);
-    return p;
-  }
 
   // Start a waiting room's table when it is ready (auto: full; else the host asked). Members who can no longer play (seated at another
   // table, short of the buy-in) are dropped first; if the host is dropped the room closes. Mutates and returns `room`.

@@ -43,7 +43,12 @@ const agedQueue=()=>pool.query('update public.queue set since=now()-make_interva
 const freshQueue=()=>pool.query('delete from public.queue where uid=any($1::uuid[])',[U]);
 const resetChips=(us=U)=>Promise.all(us.map(u=>setChips(u,10000)));
 
-const pollAll=async(game,humans)=>{const views={};for(const u of humans)views[u]=(await rpc(u,'select public.game_poll($1,-1)',[game])).view;return views};
+// one after another: a poll may write the same games row
+const pollAll=async(game,humans)=>{
+  const views={};
+  for(const u of humans){views[u]=(await rpc(u,'select public.game_poll($1,-1)',[game])).view}
+  return views;
+};
 // one step: the human to act moves (the bot logic on their own view); otherwise bots / time-outs are driven by tick
 async function playStep(game,humans,views,steps,fold){
   const v0=views[humans[0]],seat=v0.toAct;

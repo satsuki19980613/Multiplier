@@ -25,7 +25,10 @@ function ensure() {
     const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = secureRnd() * 2 - 1;
     // iOS: a silent buffer inside the gesture unlocks output
     const s = ctx.createBufferSource(); s.buffer = ctx.createBuffer(1, 1, 22050); s.connect(ctx.destination); s.start(0);
-  } catch (e) { ctx = null /* no audio here: every call below stays a no-op */ }
+  } catch {
+    // no audio here: every call below stays a no-op
+    ctx = null;
+  }
   return ctx;
 }
 /** call from a user gesture (it is also hooked to the first tap / key automatically) */

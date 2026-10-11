@@ -216,6 +216,13 @@ function narrowCall(range, q, draw, river) {
   }
   return out;
 }
+// how much of a combo stays in a bet / raise range: value, semi-bluff (draw), medium, air
+function betWeight(q, draw, river, raise, thr, airW) {
+  if (q >= thr) return 1;
+  if (!river && draw >= 6) return raise ? 0.5 : 0.7;
+  if (q >= 0.5) return raise ? 0.08 : 0.35;
+  return airW;
+}
 // bet / raise: value (q >= thr), semi-bluffs (draws), pure bluffs sized by the bluff/value ratio
 function narrowBet(range, q, draw, river, kind, f, tight) {
   const out = new Float32Array(NC);
@@ -228,14 +235,9 @@ function narrowBet(range, q, draw, river, kind, f, tight) {
   }
   const bluffTarget = valueMass * (f / (1 + f)) * 0.8 * tight;
   const airW = airMass > 0 ? Math.min(1, bluffTarget / airMass) : 0;
+  const raise = kind === 'raise';
   for (let k = 0; k < NC; k++) {
-    const w = range[k]; if (w <= 0) continue;
-    let m;
-    if (q[k] >= thr) m = 1;
-    else if (!river && draw[k] >= 6) m = kind === 'raise' ? 0.5 : 0.7;
-    else if (q[k] >= 0.5) m = kind === 'raise' ? 0.08 : 0.35;
-    else m = airW;
-    out[k] = w * m;
+    if (range[k] > 0) out[k] = range[k] * betWeight(q[k], draw[k], river, raise, thr, airW);
   }
   // never empty
   if (rangeMass(out) < 1) return Float32Array.from(range);

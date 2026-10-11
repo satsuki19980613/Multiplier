@@ -71,7 +71,8 @@ export function render(el) {
     return `<li class="on${m.away ? ' away' : ''}"><span class="sl-n">${i + 1}</span><span class="sl-name">${m.me ? '<span class="me">YOU</span> ' : ''}${esc(m.name)}</span>${m.host ? '<span class="sl-tag">HOST</span>' : ''}</li>`;
   }).join('');
   const canStart = v.isHost && n >= 2 && n < v.seats && !v.members.some(m => m.away);
-  const startBtn = v.isHost ? `<button class="btn primary" id="roomStart" type="button" ${canStart && !R.busy ? '' : 'disabled'}>Start</button>` : '';
+  const startOff = canStart && !R.busy ? '' : 'disabled';
+  const startBtn = v.isHost ? `<button class="btn primary" id="roomStart" type="button" ${startOff}>Start</button>` : '';
   paint(el, `<div class="qbox room-box">
       <div class="q-stake">PRIVATE · ${STAKE_LABEL[v.stake]} · ${fmt(STAKES[v.stake].buyIn)}</div>
       <div class="code-big" aria-label="部屋番号 ${esc(v.code)}"><small>ROOM</small>${esc(spaced(v.code))}</div>
