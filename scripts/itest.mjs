@@ -84,6 +84,11 @@ try{
   await pool.query(`insert into neon_auth."user"(id,name,email,"emailVerified","createdAt","updatedAt")
     select u,'t','t'||i||'@example.test',false,now(),now() from unnest($1::uuid[]) with ordinality as x(u,i)`,[U]);
 
+  // ---- login data is not kept (20261011000000_auth_scrub.sql) ----
+  await pool.query(`update neon_auth."user" set email='x@example.test',name='Real Name',image='https://example.test/a.png' where id=$1`,[U[0]]);
+  const au=(await pool.query(`select count(*)::int n from neon_auth."user" where id=any($1::uuid[]) and email=id::text||'@multiplier.invalid' and name='Player' and image is null`,[U])).rows[0].n;
+  ok(au===U.length,'email / name / image are replaced on insert and update');
+
   // ---- access ----
   ok(await codeOf(()=>rpc(U[0],'select count(*) from public.games'))!==null,'authenticated cannot read games directly');
   ok(await codeOf(()=>rpc(U[0],'select count(*) from public.profiles'))!==null,'authenticated cannot read profiles directly');
