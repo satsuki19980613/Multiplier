@@ -263,7 +263,7 @@ export function roomPeek(room, uid, now)   // 参加前：{ code, stake, status,
 | `seasons` | id text（'2026-H2' など）、starts_at、ends_at、closed bool |
 | `hall_of_fame` | season、rank、nickname、chips（上位10人。記録のみ） |
 
-Neon Auth の表（`neon_auth."user"`・`account`・`session`）には、ログインで届く個人の情報を残さない。トリガー（`20261011000000_auth_scrub.sql`）が書き込みのたびに email を `<id>@multiplier.invalid`、name を `'Player'`、image・Google のトークン・IP アドレス・ブラウザの種類を null に置き換える。アプリはどれも使わない（表示名は `profiles.nickname`）。残っていないかは `scripts/auth-audit.mjs` が数える（CI・Live）。
+Neon Auth の表（`neon_auth."user"`・`account`・`session`）には、ログインで届く個人の情報を残さない。トリガー（`20261011000000_auth_scrub.sql`）が書き込みのたびに email を `<id>@multiplier.invalid`、name を `'Player'`、image・Google のトークン・IP アドレス・ブラウザの種類を null に置き換える。アプリはどれも使わない（表示名は `profiles.nickname`）。残っていないかは `scripts/auth-audit.mjs` が数える（CI・Live）。組織への招待（`neon_auth.invitation` の email）もアプリは使わないので、1 件でもあれば失敗にする。
 
 Data API RPC（`authenticated` にのみ公開。表は直接触らせない）：
 - `me()` → `{ nickname, chips, freeroll: { used, left, eligible }, game, season: { id, endsAt } }`。初回呼び出しでプロフィールを作る。古いゲームの削除と `season_rollover()` も行う。

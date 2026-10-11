@@ -1,5 +1,5 @@
 // Counts personal data from the login that is still in the database (read only): node scripts/auth-audit.mjs --branch <branch>
-// Fails if any row still has it, or if a scrub trigger (db/migrations/20261011000000_auth_scrub.sql) is missing or disabled.
+// Fails if any row still has it (also an invitation with an email: the app never invites, so any is unexpected), or if a scrub trigger (db/migrations/20261011000000_auth_scrub.sql) is missing or disabled.
 // Also prints the tables and columns of neon_auth (names only, never values), so a column Neon adds later gets noticed.
 // (AUDIT_DATABASE_URL=postgres://… runs it against any database, e.g. the local one in CI.)
 import{appendFileSync}from'node:fs';
@@ -23,6 +23,7 @@ try{
     (select count(*) from neon_auth."user" where name <> 'Player' or image is not null)::int profile,
     (select count(*) from neon_auth.account where "idToken" is not null or "accessToken" is not null or "refreshToken" is not null)::int tokens,
     (select count(*) from neon_auth.session where "ipAddress" is not null or "userAgent" is not null)::int sessions,
+    (select count(*) from neon_auth.invitation where email is not null)::int invitations,
     (select count(*) from pg_trigger t join pg_proc p on p.oid=t.tgfoid
       where not t.tgisinternal and t.tgenabled<>'D' and p.pronamespace='public'::regnamespace
         and (t.tgrelid::regclass::text,p.proname) in (('neon_auth."user"','auth_user_scrub'),('neon_auth.account','auth_account_scrub'),('neon_auth.session','auth_session_scrub')))::int triggers`);
@@ -30,6 +31,7 @@ try{
   check('表示名・画像が残っている利用者',n.profile===0,`${n.profile} / ${n.users}`);
   check('Google のトークンが残っているアカウント',n.tokens===0,n.tokens);
   check('IP アドレス・ブラウザの種類が残っているセッション',n.sessions===0,n.sessions);
+  check('メールアドレスが入っている組織への招待（アプリは使わない）',n.invitations===0,n.invitations);
   check('置き換えのトリガーが 3 つとも有効',n.triggers===3,n.triggers);
   const cols=await client.query(`select table_name t,string_agg(column_name,', ' order by ordinal_position) c
     from information_schema.columns where table_schema='neon_auth' group by 1 order by 1`);
