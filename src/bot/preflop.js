@@ -40,20 +40,23 @@ export function shiftedProb(probs, cls, delta) {
   for (let c = 0; c < 169; c++) mass += probs[c] * CLASS_COMBOS[c];
   const target = mass + (delta / 100) * NC;
   if (target <= 0) return 0;
-  if (delta > 0) {
-    if (p > 0) return p;
-    let add = target - mass;
-    for (const c of CLASS_ORDER) {
-      if (probs[c] > 0) continue;
-      const m = CLASS_COMBOS[c];
-      if (c === cls) return Math.max(0, Math.min(1, add / m));
-      add -= m;
-      if (add <= 0) return 0;
-    }
-    return 0;
+  if (delta > 0) return p > 0 ? p : grownProb(probs, cls, target - mass);
+  return shrunkProb(probs, cls, mass - target);
+}
+// widen: `add` combos go to the strongest excluded classes
+function grownProb(probs, cls, add) {
+  for (const c of CLASS_ORDER) {
+    if (probs[c] > 0) continue;
+    const m = CLASS_COMBOS[c];
+    if (c === cls) return Math.max(0, Math.min(1, add / m));
+    add -= m;
+    if (add <= 0) return 0;
   }
-  // shrink: drop mass from the weakest included classes
-  let drop = mass - target;
+  return 0;
+}
+// shrink: drop mass from the weakest included classes
+function shrunkProb(probs, cls, drop) {
+  const p = probs[cls];
   for (let i = CLASS_ORDER.length - 1; i >= 0; i--) {
     const c = CLASS_ORDER[i];
     if (probs[c] <= 0) continue;
@@ -65,6 +68,11 @@ export function shiftedProb(probs, cls, delta) {
   return p;
 }
 
+function nodeProb(node, c, stack) {
+  if (node === 'hp') return huPush(c, Math.min(stack, HU_MAX));
+  if (node === 'hc') return huCall(c, Math.min(stack, HU_MAX));
+  return twProb(node, c, Math.min(stack, TW_MAX));
+}
 const _cache = new Map();
 export function nodeProbs(node, stack) {
   // returns Float64Array(169) of probabilities (0..1) for the node at that stack (bb)
@@ -72,15 +80,17 @@ export function nodeProbs(node, stack) {
   let v = _cache.get(key);
   if (v) return v;
   v = new Float64Array(169);
-  for (let c = 0; c < 169; c++) {
-    v[c] = node === 'hp' ? huPush(c, Math.min(stack, HU_MAX)) : node === 'hc' ? huCall(c, Math.min(stack, HU_MAX)) : twProb(node, c, Math.min(stack, TW_MAX));
-  }
+  for (let c = 0; c < 169; c++) v[c] = nodeProb(node, c, stack);
   if (_cache.size > 4000) _cache.clear();
   _cache.set(key, v);
   return v;
 }
 
 // ---------- preflop story from the action log
+const raiseRole = (n) => {
+  if (n === 1) return 'open';
+  return n === 2 ? '3bet' : '4bet';
+};
 export function preflopStory(S) {
   const bb = S.bb;
   let level = bb, raises = 0, raiser = -1, raiseTo = bb, lastRaiseAllIn = false;
@@ -92,11 +102,14 @@ export function preflopStory(S) {
     if (a.type === 'sb' || a.type === 'bb') { continue; }
     if (a.type === 'fold') { role[a.seat] = 'fold'; continue; }
     if (a.type === 'check') { role[a.seat] = 'check'; continue; }
-    if (a.type === 'call') { if (raises === 0) { limpers.push(a.seat); role[a.seat] = 'limp'; } else role[a.seat] = 'call'; continue; }
+    if (a.type === 'call') {
+      if (raises === 0) { limpers.push(a.seat); role[a.seat] = 'limp'; } else role[a.seat] = 'call';
+      continue;
+    }
     if (a.type === 'raise' || a.type === 'bet') {
       raises++; raiser = a.seat; raiseTo = a.to; level = a.to; lastRaiseAllIn = a.allIn;
       raiseSeq.push({ seat: a.seat, to: a.to, allIn: a.allIn });
-      role[a.seat] = raises === 1 ? 'open' : raises === 2 ? '3bet' : '4bet';
+      role[a.seat] = raiseRole(raises);
     }
   }
   return { raises, raiser, raiseTo, level, limpers, role, lastRaiseAllIn, raiseSeq };
@@ -138,13 +151,11 @@ export function nashNode(S, st, forceJam = false) {
     const rseat = rs.seat;
     if (me === sbS && rseat === btn && st.limpers.length === 0) return { node: 'sc', stack: nodeStack3('sc', B, Sx, K), kind: 'call' };
     if (me === bbS) {
-      const others = acted.filter((a) => a.seat !== rseat);
-      const callers = acted.filter((a) => a.type === 'call' || a.type === 'raise');
       if (rseat === sbS && acted.length === 2 && acted[0].seat === btn && acted[0].type === 'fold') return { node: 'b1', stack: nodeStack3('b1', B, Sx, K), kind: 'call' };
       if (rseat === btn) {
         const sbAct = acted.find((a) => a.seat === sbS);
-        if (acted.length === 2 && sbAct && sbAct.type === 'fold') return { node: 'b2', stack: nodeStack3('b2', B, Sx, K), kind: 'call' };
-        if (acted.length === 2 && sbAct && sbAct.type === 'call') return { node: 'b3', stack: nodeStack3('b3', B, Sx, K), kind: 'call' };
+        if (acted.length === 2 && sbAct?.type === 'fold') return { node: 'b2', stack: nodeStack3('b2', B, Sx, K), kind: 'call' };
+        if (acted.length === 2 && sbAct?.type === 'call') return { node: 'b3', stack: nodeStack3('b3', B, Sx, K), kind: 'call' };
       }
     }
     return null;
@@ -161,7 +172,11 @@ export function nashNode(S, st, forceJam = false) {
   return null;
 }
 
-const massPct = (probs) => { let m = 0; for (let c = 0; c < 169; c++) m += probs[c] * CLASS_COMBOS[c]; return (m / NC) * 100; };
+const massPct = (probs) => {
+  let m = 0;
+  for (let c = 0; c < 169; c++) m += probs[c] * CLASS_COMBOS[c];
+  return (m / NC) * 100;
+};
 function statsOf(S) { return S.stats || (S.stats = oppStats(S.view)); }
 
 // Observed jam width (percent) of seat v if it deviates clearly from the Nash width `nashPct`, else null.
@@ -189,9 +204,17 @@ function jamRange(S, raiserSeat, stack) {
 
 // base opening width by position (percent of hands) for a sized raise
 function raiseWidth(S, pos, toBB) {
-  let w = S.n === 2 ? 62 : pos === 'btn' ? 40 : pos === 'sb' ? 34 : 22;
-  w *= toBB <= 2.4 ? 1.1 : toBB <= 3.4 ? 1 : toBB <= 4.6 ? 0.75 : 0.55;
-  return Math.min(95, w);
+  return Math.min(95, posWidth(S, pos) * sizeFactor(toBB));
+}
+function posWidth(S, pos) {
+  if (S.n === 2) return 62;
+  if (pos === 'btn') return 40;
+  return pos === 'sb' ? 34 : 22;
+}
+function sizeFactor(toBB) {
+  if (toBB <= 2.4) return 1.1;
+  if (toBB <= 3.4) return 1;
+  return toBB <= 4.6 ? 0.75 : 0.55;
 }
 
 // estimate a villain's preflop range at the start of the flop (or now) from the story
@@ -212,12 +235,12 @@ export function villainPreflopRange(S, st, v, atFlop) {
       if (sv && sv.n >= 3) w = Math.min(100, ((sv.raise + (6 * w) / 100) / (sv.n + 6)) * 100 * (toBB > 4.6 ? 0.8 : 1));
       range = bandRange(0, w);
     } else {
-      const w = r === '3bet' ? (rs.allIn ? 14 : 9) : 5;
+      let w = 5;
+      if (r === '3bet') w = rs.allIn ? 14 : 9;
       range = bandRange(0, Math.max(3, w * (eff < 12 ? 1.2 : 1)));
     }
   } else if (r === 'call') {
     // called a raise: not the strongest (they would 3-bet), not the weakest
-    const raiser = st.raiseSeq[0] ? st.raiseSeq[0].seat : -1;
     const lo = pos === 'bb' ? 8 : 9, hi = pos === 'bb' ? 58 : 38;
     range = bandRange(lo, hi);
   } else if (r === 'limp') {
@@ -247,9 +270,15 @@ function realization(S, effBB, oop) {
   return Math.min(1, r);
 }
 
+// effective stack (bb, hand start) against the biggest live opponent
+const effStackBB = (S) => Math.min(S.startBB[S.seat], Math.max(...S.live.map((o) => S.startBB[o]), 0.1));
+function openWidth(S) {
+  if (S.n === 2) return 56;
+  return S.pos === 'btn' ? 36 : 30;
+}
+
 export function preflopMove(S, P, rnd, rng) {
   const L = S.L, bb = S.bb;
-  const me = S.seat;
   const [h0, h1] = S.hole;
   const cls = classIndex(h0, h1);
   const pct = CLASS_PCT[cls];
@@ -278,17 +307,16 @@ export function preflopMove(S, P, rnd, rng) {
       const probs = nodeProbs(node.node, node.stack);
       const p = shiftedProb(probs, cls, node.kind === 'jam' ? sh.jam : sh.call);
       const go = rnd() < p;
-      if (node.kind === 'jam') return go ? jamMove(L) : (L.canCheck ? { type: 'check' } : FOLD);
+      if (node.kind === 'jam') return go ? jamMove(L) : passive(L);
       return go ? { type: 'call' } : FOLD;
     }
   }
 
-  const effBB = Math.min(S.startBB[me], Math.max(...S.live.map((o) => S.startBB[o]), 0.1));
-  const depth = effBB;
+  const depth = effStackBB(S);
 
   // ---- facing a raise (not a table node)
   if (st.raises > 0) {
-    return facingRaise(S, st, P, sh, cls, pct, depth, rnd, rng);
+    return facingRaise(S, st, P, sh, cls, rnd, rng);
   }
 
   // ---- no raise yet: open / iso / limp-check decisions
@@ -297,14 +325,15 @@ export function preflopMove(S, P, rnd, rng) {
     // first to act (BTN, or HU SB) or SB after BTN fold (3-handed) at depth
     if (depth <= CFG.NASH_MAX + 0.01 || depth <= CFG.ZONE_A_MAX) {
       // jam or fold with the nearest table node (non-table situations at shallow depth)
-      const nd = S.n === 2 ? 'hp' : (S.pos === 'btn' ? 'a' : 'sp');
+      let nd = S.pos === 'btn' ? 'a' : 'sp';
+      if (S.n === 2) nd = 'hp';
       const ex = exploitJam(S, h0, h1, depth, rng, sh);
       if (ex !== null) return ex ? jamMove(L) : passive(L);
       const probs = nodeProbs(nd, depth);
       const go = rnd() < shiftedProb(probs, cls, sh.jam);
       return go ? jamMove(L) : passive(L);
     }
-    const openTop = (S.n === 2 ? 56 : S.pos === 'btn' ? 36 : 30) + sh.open;
+    const openTop = openWidth(S) + sh.open;
     if (pct <= openTop) {
       const mult = P.openSize;
       const to = bb * (S.pos === 'sb' && S.n === 3 ? mult + 0.6 : mult);
@@ -331,25 +360,28 @@ export function preflopMove(S, P, rnd, rng) {
   return passive(L);
 }
 
-function facingRaise(S, st, P, sh, cls, pct, depth, rnd, rng) {
-  const L = S.L, bb = S.bb, me = S.seat;
-  const [h0, h1] = S.hole;
-  const raiser = st.raiser;
-  const pay = L.callAmount;
-  const potAfter = S.pot + pay;
-  const need = pay / potAfter;
-  const raiseToBB = st.raiseTo / bb;
-  const jam = jamLike(S, raiser, st.raiseTo) || pay >= S.stack;
-  // villain ranges: raiser plus other live players that already put money in
-  const vr = [];
-  const base = villainPreflopRange(S, st, raiser, false);
-  vr.push(base);
+// villain ranges when facing a raise: the raiser plus other live players that already put money in (my cards removed)
+function facedRanges(S, st, raiser) {
+  const vr = [villainPreflopRange(S, st, raiser, false)];
   for (const o of S.live) {
     if (o === raiser) continue;
     const r = st.role[o];
     if (r === 'call' || r === 'limp') vr.push(villainPreflopRange(S, st, o, false));
   }
   for (const r of vr) removeDead(r, S.hole);
+  return vr;
+}
+
+function facingRaise(S, st, P, sh, cls, rnd, rng) {
+  const L = S.L;
+  const [h0, h1] = S.hole;
+  const pct = CLASS_PCT[cls], depth = effStackBB(S);
+  const raiser = st.raiser;
+  const pay = L.callAmount;
+  const potAfter = S.pot + pay;
+  const need = pay / potAfter;
+  const jam = jamLike(S, raiser, st.raiseTo) || pay >= S.stack;
+  const vr = facedRanges(S, st, raiser);
   const eq = equity(h0, h1, [], vr.slice(0, 2), CFG.EQ_SAMPLES, rng);
   if (jam) {
     // calling a jam: no realisation issue, just pot odds (+ a little margin for the field behind / persona)

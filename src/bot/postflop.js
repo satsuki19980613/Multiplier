@@ -6,6 +6,19 @@ import { drawOuts } from './eval.js';
 
 export const PF = { EQ_SAMPLES: 2000 };
 
+// chips put in by action `a` (bets = this street's bets so far)
+function paidBy(a, bets) {
+  if (a.type === 'call') return a.pay;
+  if (a.type === 'bet' || a.type === 'raise') return a.to - bets[a.seat];
+  return 0;
+}
+// the range after a villain's postflop action (null: the action does not narrow it). frac = bet / pot
+function narrowAfter(cur, a, b, frac, dd) {
+  if (a.type === 'bet' || a.type === 'raise') return narrow(cur, b, a.type, frac, dd);
+  if (a.type === 'call' || a.type === 'check') return narrow(cur, b, a.type, 0, dd);
+  return null;
+}
+
 // Replay this hand's postflop actions and narrow each live villain's range accordingly.
 function villainRanges(S, st) {
   const view = S.view, me = S.seat;
@@ -18,30 +31,21 @@ function villainRanges(S, st) {
     ranges.set(o, r);
   }
   // pot at the start of the first postflop street
-  let pot = 0, level = 0;
+  let pot = 0;
   const bets = [0, 0, 0];
   let curStreet = 'preflop';
-  let streetBoardLen = 0;
   const lens = { flop: 3, turn: 4, river: 5 };
   for (const a of S.acts) {
     if (a.street !== curStreet) {
-      curStreet = a.street; bets[0] = bets[1] = bets[2] = 0; level = 0;
+      curStreet = a.street; bets[0] = bets[1] = bets[2] = 0;
     }
-    if (a.type === 'sb' || a.type === 'bb') { pot += a.pay; bets[a.seat] += a.pay; level = Math.max(level, bets[a.seat]); continue; }
-    const add = a.type === 'call' ? a.pay : (a.type === 'bet' || a.type === 'raise') ? a.to - bets[a.seat] : 0;
+    if (a.type === 'sb' || a.type === 'bb') { pot += a.pay; bets[a.seat] += a.pay; continue; }
+    const add = paidBy(a, bets);
     if (a.street !== 'preflop' && a.seat !== me && ranges.has(a.seat)) {
-      const b = board.slice(0, lens[a.street]);
-      const dd = S.hole;
-      const cur = ranges.get(a.seat);
-      let nr = null;
-      if (a.type === 'bet') nr = narrow(cur, b, 'bet', add / Math.max(pot, 1), dd);
-      else if (a.type === 'raise') nr = narrow(cur, b, 'raise', add / Math.max(pot, 1), dd);
-      else if (a.type === 'call') nr = narrow(cur, b, 'call', 0, dd);
-      else if (a.type === 'check') nr = narrow(cur, b, 'check', 0, dd);
+      const nr = narrowAfter(ranges.get(a.seat), a, board.slice(0, lens[a.street]), add / Math.max(pot, 1), S.hole);
       if (nr) { removeDead(nr, dead); ranges.set(a.seat, nr); }
     }
     pot += add; bets[a.seat] += add;
-    if (a.type === 'bet' || a.type === 'raise') level = a.to;
   }
   return ranges;
 }
@@ -61,14 +65,13 @@ export function postflopMove(S, P, rnd, rng) {
   const board = S.board, nb = board.length;
   const [h0, h1] = S.hole;
   const ranges = villainRanges(S, st);
-  const active = S.live.filter((o) => S.behind[o] > 0 || S.bet[o] > 0);
   const vlist = S.live.map((o) => ranges.get(o));
   const eq = equity(h0, h1, board, vlist.slice(0, 2), nb === 5 ? PF.EQ_SAMPLES * 1.2 : PF.EQ_SAMPLES, rng);
   const nv = S.live.length;
   const nAct = S.live.filter((o) => S.behind[o] > 0).length; // opponents who can still act
   const ip = heroInPosition(S);
   const pot = S.pot, toCall = L.toCall, stack = S.stack;
-  const effBehind = Math.min(stack, Math.max(0, ...S.live.map((o) => S.behind[o] + S.bet[o])) - (S.bet[me] > 0 ? 0 : 0));
+  const effBehind = Math.min(stack, Math.max(0, ...S.live.map((o) => S.behind[o] + S.bet[o])));
   const spr = effBehind / Math.max(pot, 1);
   const street = S.street;
   const outs = nb < 5 ? drawOuts(h0, h1, board, nb) : 0;
@@ -88,10 +91,8 @@ export function postflopMove(S, P, rnd, rng) {
   if (toCall > 0) {
     const need = toCall / (pot + toCall);
     const allInCall = toCall >= stack;
-    let R = street === 'river' || allInCall ? 1 : ip ? 0.96 : 0.88;
-    if (spr <= 1.5) R = 1;
-    // what bet-size did the villain use? (relative to the pot before the bet)
-    const f = toCall / Math.max(1, pot - toCall);
+    let R = ip ? 0.96 : 0.88;
+    if (street === 'river' || allInCall || spr <= 1.5) R = 1;
     const bluffCoef = P.bluff;
     // raise for value
     if (L.maxRaiseTo != null && !allInCall) {
@@ -129,7 +130,7 @@ export function postflopMove(S, P, rnd, rng) {
   }
   if (eq >= good) {
     if (spr <= 1.2) return jamMove(L);
-    if (rnd() < 0.75 * aggr * ipBonus) return betTo(multi ? 0.5 : 0.5);
+    if (rnd() < 0.75 * aggr * ipBonus) return betTo(0.5);
     return { type: 'check' };
   }
   if (eq >= thin) {

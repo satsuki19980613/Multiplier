@@ -60,7 +60,7 @@ export function checkEntry(p,stake){
 }
 
 // a deterministic "random" in [0,1) from small integers (bot think time must be the same wherever it is computed)
-function hash01(...xs){let h=2166136261;for(const x of xs){h^=x|0;h=Math.imul(h,16777619);h^=h>>>15}return((h>>>0)%100000)/100000}
+function hash01(...xs){let h=2166136261;for(const x of xs){h^=Math.trunc(x);h=Math.imul(h,16777619);h^=h>>>15}return((h>>>0)%100000)/100000}
 const thinkMs=(ver,seat)=>Math.round(BOT_THINK_MS[0]+hash01(ver,seat,7)*(BOT_THINK_MS[1]-BOT_THINK_MS[0]));
 
 const isBot=(meta,seat)=>Boolean(meta.bots[seat]);
@@ -97,10 +97,13 @@ export function createTable({players,stake,now,rnd,room=null,forceMultiplier=nul
   return{state,meta};
 }
 
-const MOVES=['fold','check','call','raise'];
+const MOVES=new Set(['fold','check','call','raise']);
 function toEngineMove(m){
-  if(!m||typeof m!=='object'||!MOVES.includes(m.type))throw new MoveError('illegal');
-  if(m.type==='raise'){if(!Number.isInteger(m.to))throw new MoveError('illegal');return{type:'raise',to:m.to}}
+  if(!m||typeof m!=='object'||!MOVES.has(m.type))throw new MoveError('illegal');
+  if(m.type==='raise'){
+    if(!Number.isInteger(m.to))throw new MoveError('illegal');
+    return{type:'raise',to:m.to};
+  }
   return{type:m.type};
 }
 function engineCall(fn){
@@ -141,8 +144,8 @@ function retire(game,seat,now){
 /** Apply a human's request. game = { state, meta }; req = { op:'act', ver, move } or { op:'retire' }. => { state, clock }. Throws MoveError.
  *  The stored game is not mutated. */
 export function applyRequest(game,seat,req,now){
-  if(req&&req.op==='retire')return retire(game,seat,now);
-  if(!req||req.op!=='act')throw new MoveError('illegal');
+  if(req?.op==='retire')return retire(game,seat,now);
+  if(req?.op!=='act')throw new MoveError('illegal');
   if(game.state.over)throw new MoveError('game_over');
   if(!Number.isInteger(seat)||seat<0||seat>2||game.meta.bots[seat])throw new MoveError('not_your_turn');
   if(req.ver!==game.state.ver)throw new MoveError('stale');
@@ -170,7 +173,8 @@ export function tick(game,now,{botMove,rnd=Math.random}={}){
     if(!ok){const g2=clone(game.state);autoAction(g2,seat,now);return{state:g2,clock:afterMove(game,g2,now,seat,'bot')}}
     return{state:g,clock:afterMove(game,g,now,seat,'bot')};
   }
-  const due=c.deadline===null?Infinity:isSitOut(c,seat)?c.deadline:c.deadline+GRACE_MS;
+  let due=Infinity;
+  if(c.deadline!==null)due=isSitOut(c,seat)?c.deadline:c.deadline+GRACE_MS;
   if(now<due)throw new MoveError('not_yet');
   engineCall(()=>autoAction(g,seat,now));
   return{state:g,clock:afterMove(game,g,now,seat,'timeout')};

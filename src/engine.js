@@ -24,12 +24,13 @@ function straightTop(m) {                                  // m: 13-bit rank mas
 }
 export function eval7(cards) {                             // 5 to 7 cards => integer score (bigger is stronger)
   let s0 = 0, s1 = 0, s2 = 0, s3 = 0, n0 = 0, n1 = 0, n2 = 0, n3 = 0, one = 0, two = 0, three = 0, four = 0;
-  for (let i = 0; i < cards.length; i++) {
-    const c = cards[i], b = 1 << (c >> 2);
+  for (const c of cards) {
+    const b = 1 << (c >> 2);
     switch (c & 3) { case 0: s0 |= b; n0++; break; case 1: s1 |= b; n1++; break; case 2: s2 |= b; n2++; break; default: s3 |= b; n3++; }
     four |= three & b; three |= two & b; two |= one & b; one |= b;
   }
-  const fm = n0 >= 5 ? s0 : n1 >= 5 ? s1 : n2 >= 5 ? s2 : n3 >= 5 ? s3 : 0;
+  let fm = 0;
+  if (n0 >= 5) fm = s0; else if (n1 >= 5) fm = s1; else if (n2 >= 5) fm = s2; else if (n3 >= 5) fm = s3;
   if (fm) { const t = straightTop(fm); if (t >= 0) return (8 << 20) | (t << 16); }
   if (four) { const q = hb(four); return (7 << 20) | (q << 16) | (hb(one & ~(1 << q)) << 12); }
   if (three) {
@@ -102,7 +103,7 @@ function nextAlive(g, s) { do { s = (s + 1) % 3; } while (g.seats[s].out); retur
 
 export function levelAt(g, now) {
   const l = Math.floor((now - g.startedAt) / g.levelMs);
-  return l <= 0 ? 0 : l >= BLINDS.length ? BLINDS.length - 1 : l;
+  return Math.min(Math.max(l, 0), BLINDS.length - 1);
 }
 export function actor(g) { return g.over ? null : g.toAct; }
 
@@ -112,7 +113,8 @@ export function actor(g) { return g.over ? null : g.toAct; }
 export function newGame({ stack, levelMs, now = 0, rnd, names, stacks, button } = {}) {
   const st = stacks ? stacks.slice() : [stack, stack, stack];
   if (st.length !== 3 || !st.every(x => Number.isInteger(x) && x >= 0) || st.filter(x => x > 0).length < 2) throw new Error('newGame: bad stacks');
-  if (!(levelMs > 0)) throw new Error('newGame: levelMs required');
+  const levelOk = levelMs > 0;                             // (also false for a missing / NaN value)
+  if (!levelOk) throw new Error('newGame: levelMs required');
   const seed = [];
   if (rnd) for (let i = 0; i < 8; i++) seed.push(Math.floor(rnd() * 4294967296) >>> 0);
   else seed.push(...globalThis.crypto.getRandomValues(new Uint32Array(8)));
@@ -181,6 +183,10 @@ function findActor(g, from) {
   for (let k = 1; k <= 3; k++) { const s = (from + k) % 3; if (g.needAct[s] && !g.folded[s] && !g.allIn[s]) return s; }
   return -1;
 }
+const streetTitle = i => {
+  if (i === 1) return 'Flop';
+  return i === 2 ? 'Turn' : 'River';
+};
 function nextStreet(g) {
   const order = ['preflop', 'flop', 'turn', 'river'], i = order.indexOf(g.street) + 1;
   g.street = order[i];
@@ -188,7 +194,7 @@ function nextStreet(g) {
   const n = i === 1 ? 3 : 1, cs = [];
   for (let k = 0; k < n; k++) cs.push(g.deck.pop());
   g.board.push(...cs);
-  log(g, `${i === 1 ? 'Flop' : i === 2 ? 'Turn' : 'River'}: ${cs.map(cardStr).join(' ')}`);
+  log(g, `${streetTitle(i)}: ${cs.map(cardStr).join(' ')}`);
   g.bet = [0, 0, 0]; g.currentBet = 0; g.minRaise = g.bb; g.seen = [null, null, null];
   g.needAct = SEATS.map(s => !g.folded[s] && !g.allIn[s]);
 }
@@ -220,38 +226,45 @@ export function legalActions(g) {
   };
 }
 
+const illegal = m => new EngineError('illegal', m);
+const allInTag = (g, seat) => (g.allIn[seat] ? ' (all-in)' : '');
+// the moves of applyAction: each checks before it mutates
+function doCall(g, seat, L) {
+  if (!L.canCall) throw illegal('nothing to call');
+  const st = g.seats[seat], pay = L.callAmount;
+  st.stack -= pay; g.bet[seat] += pay; g.total[seat] += pay;
+  if (st.stack === 0) g.allIn[seat] = true;
+  g.needAct[seat] = false; g.seen[seat] = g.currentBet;
+  log(g, `{${seat}} calls ${pay}${allInTag(g, seat)}`);
+}
+function doRaise(g, seat, to, L) {
+  if (L.minRaiseTo == null) throw illegal('cannot raise');
+  if (!Number.isInteger(to) || to < L.minRaiseTo || to > L.maxRaiseTo) throw illegal('raise out of range');
+  const st = g.seats[seat], add = to - g.bet[seat], prev = g.currentBet, open = prev === 0;
+  st.stack -= add; g.bet[seat] = to; g.total[seat] += add;
+  if (st.stack === 0) g.allIn[seat] = true;
+  if (to - prev >= g.minRaise) g.minRaise = to - prev;   // a full raise; an incomplete all-in leaves the minimum untouched
+  g.currentBet = to; g.seen[seat] = to; g.needAct[seat] = false;
+  for (const o of SEATS) if (o !== seat && !g.folded[o] && !g.allIn[o]) g.needAct[o] = true;
+  log(g, `{${seat}} ${open ? 'bets' : 'raises to'} ${to}${allInTag(g, seat)}`);
+}
+
 export function applyAction(g, seat, move, now) {
   if (g.over) throw new EngineError('game_over');
   if (g.toAct !== seat) throw new EngineError('not_your_turn');
-  const L = legalActions(g), type = move && move.type;
-  const bad = m => new EngineError('illegal', m);
-  const st = g.seats[seat];
+  const L = legalActions(g), type = move?.type;
   if (type === 'fold') {
     g.folded[seat] = true; g.needAct[seat] = false;
     log(g, `{${seat}} folds`);
   } else if (type === 'check') {
-    if (!L.canCheck) throw bad('cannot check');
+    if (!L.canCheck) throw illegal('cannot check');
     g.needAct[seat] = false; g.seen[seat] = g.currentBet;
     log(g, `{${seat}} checks`);
   } else if (type === 'call') {
-    if (!L.canCall) throw bad('nothing to call');
-    const pay = L.callAmount;
-    st.stack -= pay; g.bet[seat] += pay; g.total[seat] += pay;
-    if (st.stack === 0) g.allIn[seat] = true;
-    g.needAct[seat] = false; g.seen[seat] = g.currentBet;
-    log(g, `{${seat}} calls ${pay}${g.allIn[seat] ? ' (all-in)' : ''}`);
+    doCall(g, seat, L);
   } else if (type === 'raise') {
-    const to = move.to;
-    if (L.minRaiseTo == null) throw bad('cannot raise');
-    if (!Number.isInteger(to) || to < L.minRaiseTo || to > L.maxRaiseTo) throw bad('raise out of range');
-    const add = to - g.bet[seat], prev = g.currentBet, open = prev === 0;
-    st.stack -= add; g.bet[seat] = to; g.total[seat] += add;
-    if (st.stack === 0) g.allIn[seat] = true;
-    if (to - prev >= g.minRaise) g.minRaise = to - prev;   // a full raise; an incomplete all-in leaves the minimum untouched
-    g.currentBet = to; g.seen[seat] = to; g.needAct[seat] = false;
-    for (const o of SEATS) if (o !== seat && !g.folded[o] && !g.allIn[o]) g.needAct[o] = true;
-    log(g, `{${seat}} ${open ? 'bets' : 'raises to'} ${to}${g.allIn[seat] ? ' (all-in)' : ''}`);
-  } else throw bad('unknown move');
+    doRaise(g, seat, move.to, L);
+  } else throw illegal('unknown move');
   g.ver++;
   progress(g, now, seat);
   return g;
@@ -292,6 +305,10 @@ export function forfeit(g, seat, now) {
 }
 
 /* ---------------- end of hand ---------------- */
+const potTag = (n, idx) => {
+  if (n <= 1) return '';
+  return idx === 0 ? ' (main pot)' : ' (side pot)';
+};
 function finishHand(g, now) {
   const start = g.handStart, alive = SEATS.filter(i => !g.folded[i]);
   // uncalled part of the biggest contribution goes back to its owner (only a seat still in the hand: chips of a folded or retired seat stay in the pot)
@@ -309,8 +326,8 @@ function finishHand(g, now) {
     let amount = 0; for (const s of SEATS) amount += Math.min(g.total[s], lvl) - Math.min(g.total[s], prev);
     let eligible = alive.filter(s => g.total[s] >= lvl);
     if (!eligible.length) eligible = alive.slice();
-    const last = pots[pots.length - 1];
-    if (last && last.eligible.join() === eligible.join()) last.amount += amount;
+    const last = pots.at(-1);
+    if (last?.eligible.join() === eligible.join()) last.amount += amount;
     else pots.push({ amount, eligible, winners: [] });
     prev = lvl;
   }
@@ -329,7 +346,7 @@ function finishHand(g, now) {
     if (showdown) { const best = Math.max(...p.eligible.map(s => score[s])); ws = p.eligible.filter(s => score[s] === best); }
     p.winners = ws.slice();
     const share = Math.floor(p.amount / ws.length); let rem = p.amount - share * ws.length;
-    const tag = pots.length > 1 ? (idx === 0 ? ' (main pot)' : ' (side pot)') : '';
+    const tag = potTag(pots.length, idx);
     for (const s of order) if (ws.includes(s)) {          // odd chips go one by one from the seat left of the button
       const got = share + (rem > 0 ? 1 : 0); if (rem > 0) rem--;
       win[s] += got; log(g, `{${s}} wins ${got}${tag}${ws.length > 1 ? ' (split)' : ''}`);

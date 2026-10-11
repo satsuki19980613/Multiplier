@@ -67,7 +67,11 @@ export function removeDead(r, dead) {
   return r;
 }
 
-export function rangeMass(r) { let s = 0; for (let k = 0; k < NC; k++) s += r[k]; return s; }
+export function rangeMass(r) {
+  let s = 0;
+  for (let k = 0; k < NC; k++) s += r[k];
+  return s;
+}
 export function rangePct(r) { return rangeMass(r) / NC * 100; }
 
 // ---- small fast PRNG seeded from caller's rnd
@@ -126,7 +130,7 @@ export function equity(h0, h1, board, ranges, samples, rng) {
     let used1 = dhi | MHI[k1] | (k2 >= 0 ? MHI[k2] : 0);
     for (let i = 0; i < need; i++) {
       let c;
-      do { c = (rng() * 52) | 0; } while (c < 26 ? (used0 & (1 << c)) : (used1 & (1 << (c - 26))));
+      do { c = Math.floor(rng() * 52); } while (c < 26 ? (used0 & (1 << c)) : (used1 & (1 << (c - 26))));
       if (c < 26) used0 |= 1 << c; else used1 |= 1 << (c - 26);
       hs[2 + nb + i] = c; v1s[2 + nb + i] = c; v2s[2 + nb + i] = c;
     }
@@ -136,12 +140,14 @@ export function equity(h0, h1, board, ranges, samples, rng) {
     if (k2 >= 0) {
       v2s[0] = C0[k2]; v2s[1] = C1[k2];
       const s2 = evalCards(v2s, 7);
-      const mx = s1 > s2 ? s1 : s2;
+      const mx = Math.max(s1, s2);
       if (sh > mx) sc = 1;
       else if (sh < mx) sc = 0;
       else sc = 1 / (1 + (s1 === sh ? 1 : 0) + (s2 === sh ? 1 : 0));
+    } else if (sh === s1) {
+      sc = 0.5;
     } else {
-      sc = sh > s1 ? 1 : sh < s1 ? 0 : 0.5;
+      sc = sh > s1 ? 1 : 0;
     }
     sum += sc; n++;
   }
@@ -187,26 +193,32 @@ export function boardStrength(range, board, extraDead) {
 // Narrow a villain range given his action on this street. kind: 'bet' | 'raise' | 'call' | 'check'
 // f = bet size / pot-before-bet (for bet/raise). river: no draws. Returns a new Float32Array.
 export function narrow(range, board, kind, f, extraDead, tight = 1) {
-  const nb = board.length;
   const { q, draw } = boardStrength(range, board, extraDead);
+  const river = board.length >= 5;
+  if (kind === 'check') return narrowCheck(range, q);
+  if (kind === 'call') return narrowCall(range, q, draw, river);
+  return narrowBet(range, q, draw, river, kind, f, tight);
+}
+function narrowCheck(range, q) {
   const out = new Float32Array(NC);
-  const river = nb >= 5;
-  if (kind === 'check') {
-    for (let k = 0; k < NC; k++) if (range[k] > 0) out[k] = range[k] * (q[k] >= 0.88 ? 0.5 : 1);
-    return out;
+  for (let k = 0; k < NC; k++) if (range[k] > 0) out[k] = range[k] * (q[k] >= 0.88 ? 0.5 : 1);
+  return out;
+}
+function narrowCall(range, q, draw, river) {
+  const out = new Float32Array(NC);
+  for (let k = 0; k < NC; k++) {
+    const w = range[k]; if (w <= 0) continue;
+    let m;
+    if (q[k] >= 0.92) m = 0.55;
+    else if (q[k] >= 0.35) m = 1;
+    else m = !river && draw[k] >= 6 ? 0.8 : 0.12;
+    out[k] = w * m;
   }
-  if (kind === 'call') {
-    for (let k = 0; k < NC; k++) {
-      const w = range[k]; if (w <= 0) continue;
-      let m;
-      if (q[k] >= 0.92) m = 0.55;
-      else if (q[k] >= 0.35) m = 1;
-      else m = !river && draw[k] >= 6 ? 0.8 : 0.12;
-      out[k] = w * m;
-    }
-    return out;
-  }
-  // bet / raise: value (q >= thr), semi-bluffs (draws), pure bluffs sized by the bluff/value ratio
+  return out;
+}
+// bet / raise: value (q >= thr), semi-bluffs (draws), pure bluffs sized by the bluff/value ratio
+function narrowBet(range, q, draw, river, kind, f, tight) {
+  const out = new Float32Array(NC);
   const thr = kind === 'raise' ? 0.78 : 0.62;
   let valueMass = 0, airMass = 0;
   for (let k = 0; k < NC; k++) {
